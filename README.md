@@ -27,7 +27,7 @@ ITERATOR iter:CSV(<http://example.org/stops.csv>, "id", "name", "lat", "tags") A
 ## Install
 
 ```sh
-pip install -e .            # Python >= 3.10; pulls duckdb, pyarrow, rdflib, lxml, jsonpath-ng, cbor2
+pip install -e .            # Python 3.11+; pulls duckdb, pyarrow, rdflib, lxml, jsonpath-ng, cbor2
 pip install -e '.[test]'    # + pytest
 ```
 
