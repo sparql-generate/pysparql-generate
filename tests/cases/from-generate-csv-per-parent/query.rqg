@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A FROM GENERATE whose sub-query iterates a CSV file filtered by a parent variable
+GENERATE {
+  GENERATE { ?d ex:member ?n } FROM GENERATE { ex:x ex:name ?name } ITERATOR iter:CSV(<people.csv>, "id", "name", "dept") AS ?id ?name ?dept WHERE { FILTER(?dept = ?dep) } . WHERE { ex:x ex:name ?n } .
+} ITERATOR iter:CSV(<depts.csv>, "dept", "label") AS ?dep ?label WHERE { BIND(IRI(CONCAT("http://ex.org/d/", ?dep)) AS ?d) }

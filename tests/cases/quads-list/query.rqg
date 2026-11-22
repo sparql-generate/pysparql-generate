@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# LIST in a GRAPH block
+GENERATE { GRAPH ex:g { ex:s ex:p LIST(?o) } } WHERE { VALUES ?o { 1 2 3 } } ORDER BY ?o

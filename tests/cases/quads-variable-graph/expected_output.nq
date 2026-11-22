@@ -1,0 +1,6 @@
+<http://ex.org/s> <http://ex.org/p> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/s> <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g1> .
+<http://ex.org/s> <http://ex.org/p> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/s> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g2> .
+<http://ex.org/s> <http://ex.org/p> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/s> <http://ex.org/p> "4"^^<http://www.w3.org/2001/XMLSchema#integer> .

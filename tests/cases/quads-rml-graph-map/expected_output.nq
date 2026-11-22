@@ -1,0 +1,18 @@
+<http://ex.org/p/1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex.org/Person> .
+<http://ex.org/p/1> <http://ex.org/name> "Alice" <http://ex.org/g/1> .
+<http://ex.org/p/1> <http://ex.org/dept> <http://ex.org/d/10> <http://ex.org/dept/10> .
+<http://ex.org/p/2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex.org/Person> .
+<http://ex.org/p/2> <http://ex.org/name> "Bob" <http://ex.org/g/2> .
+<http://ex.org/p/2> <http://ex.org/dept> <http://ex.org/d/20> <http://ex.org/dept/20> .
+<http://ex.org/p/1> <http://ex.org/inDept> <http://ex.org/d/10> .
+<http://ex.org/p/2> <http://ex.org/inDept> <http://ex.org/d/20> .
+<http://ex.org/p/3> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex.org/Person> .
+<http://ex.org/p/3> <http://ex.org/name> "Carol" <http://ex.org/g/3> .
+<http://ex.org/p/3> <http://ex.org/dept> <http://ex.org/d/10> <http://ex.org/dept/10> .
+<http://ex.org/p/4> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex.org/Person> .
+<http://ex.org/p/4> <http://ex.org/name> "Dan" <http://ex.org/g/4> .
+<http://ex.org/p/4> <http://ex.org/dept> <http://ex.org/d/30> <http://ex.org/dept/30> .
+<http://ex.org/p/3> <http://ex.org/inDept> <http://ex.org/d/10> .
+<http://ex.org/p/4> <http://ex.org/inDept> <http://ex.org/d/30> .
+<http://ex.org/d/10> <http://ex.org/label> "Sales" <http://ex.org/dg/10> .
+<http://ex.org/d/20> <http://ex.org/label> "R&D" <http://ex.org/dg/20> .

@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A FROM GENERATE that reads variables of the parent: one dataset per parent solution
+GENERATE {
+  GENERATE { ?who ex:sees ?o } FROM GENERATE { ex:x ex:v ?i . ex:x ex:v ?{ ?i * 10 } } . WHERE { ex:x ex:v ?o } .
+} ITERATOR iter:for(1,1,3) AS ?i WHERE { BIND(IRI(CONCAT("http://ex.org/who", STR(?i))) AS ?who) }

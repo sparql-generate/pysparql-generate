@@ -1,0 +1,6 @@
+<http://ex.org/who2> <http://ex.org/reach> <http://ex.org/end2> .
+<http://ex.org/who2> <http://ex.org/reach> <http://ex.org/n2> .
+<http://ex.org/who1> <http://ex.org/reach> <http://ex.org/end1> .
+<http://ex.org/who1> <http://ex.org/reach> <http://ex.org/n2> .
+<http://ex.org/who1> <http://ex.org/reach> <http://ex.org/n1> .
+<http://ex.org/who2> <http://ex.org/reach> <http://ex.org/n1> .

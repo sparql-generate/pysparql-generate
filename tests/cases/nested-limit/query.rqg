@@ -1,0 +1,7 @@
+# A nested GENERATE is evaluated once on the table of all parent solutions:
+# ORDER BY / LIMIT apply across the parents (semantics rule (G), 2026-11-07).
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX ex: <http://ex.org/>
+GENERATE {
+  GENERATE { <http://ex.org/s{STR(?i)}> ex:q ?j } ITERATOR iter:for(1,1,4) AS ?j WHERE {} ORDER BY ?i ?j LIMIT 1 .
+} WHERE { VALUES ?i { 1 2 } }

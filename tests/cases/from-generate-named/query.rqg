@@ -1,0 +1,10 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# FROM GENERATE ... NAMED: named graphs, merged when two clauses name the same graph
+GENERATE { ?s ex:in ?g . ?s ex:v ?o }
+FROM GENERATE { ex:a ex:p 1 } NAMED <urn:g1> .
+FROM GENERATE { ex:b ex:p 2 } NAMED <urn:g1> .
+FROM GENERATE { ex:c ex:p 3 } NAMED <urn:g2> .
+FROM GENERATE { ex:d ex:p 4 } .
+WHERE { GRAPH ?g { ?s ex:p ?o } }

@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# Triples and GRAPH blocks interleaved; a dot after a block is optional; an empty block
+GENERATE { ex:s ex:p ?o . GRAPH ex:a { ex:s ex:q ?o } . ex:s ex:r ?o GRAPH ex:b { ex:s ex:t ?o . ex:s ex:u ?o } GRAPH ex:c { } ex:s ex:v ?o } WHERE { VALUES ?o { 1 } }

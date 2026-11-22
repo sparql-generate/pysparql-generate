@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pysparql-generate"
+version = "0.1.0"
+description = "SPARQL-Generate compiled to a columnar engine (DuckDB): generate RDF or text from CSV, JSON, XML, HTML and RDF"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [{ name = "Maxime Lefrançois" }]
+keywords = ["sparql", "sparql-generate", "rdf", "knowledge-graph", "duckdb", "rml"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+]
+dependencies = [
+    "duckdb>=1.1",
+    "pyarrow>=15",
+    "rdflib>=7",
+    "lxml>=5",
+    "jsonpath-ng>=1.6",
+    "cbor2>=5",
+]
+
+[project.urls]
+Homepage = "https://github.com/sparql-generate/pysparql-generate"
+Language = "https://sparql-generate.readthedocs.io/"
+Issues = "https://github.com/sparql-generate/pysparql-generate/issues"
+
+[project.optional-dependencies]
+# Turtle, TriG, RDF/XML and N3 files read without rdflib (about 25 times faster)
+fast = ["pyoxigraph>=0.4"]
+test = ["pytest>=8", "pyoxigraph>=0.4"]
+bench = ["psutil>=5", "polars>=1"]
+
+[project.scripts]
+sparql-generate-py = "sparql_generate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

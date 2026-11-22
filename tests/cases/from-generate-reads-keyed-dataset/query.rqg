@@ -1,0 +1,9 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A FROM GENERATE whose sub-query queries a dataset that depends on the parent solution
+GENERATE {
+  GENERATE {
+    GENERATE { ?who ex:r ?o } FROM GENERATE { ?s ex:q ?o } WHERE { ?s ex:p ?o } . WHERE { ?s ex:q ?o } .
+  } FROM GENERATE { ex:x ex:p ?i . ex:y ex:p ?{ ?i * 10 } } . WHERE {} .
+} ITERATOR iter:for(1,1,4) AS ?i WHERE { BIND(IRI(CONCAT("http://ex.org/who", STR(?i))) AS ?who) }

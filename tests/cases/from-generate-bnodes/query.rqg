@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# Blank nodes generated into the dataset, matched by the WHERE clause
+GENERATE { ?b ex:name ?n . ?b ex:same ?b2 }
+FROM GENERATE { [] ex:name ?name ; ex:k ?id . } ITERATOR iter:CSV(<people.csv>, "id", "name", "dept") AS ?id ?name ?dept .
+WHERE { ?b ex:name ?n . ?b2 ex:k ?k . ?b ex:k ?k }

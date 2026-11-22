@@ -1,0 +1,6 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A sub-query of GRAPH ?g is evaluated once per graph: its aggregates and its slice range over the solutions of that graph
+GENERATE {
+  GRAPH ?g { GENERATE { ex:s ex:n ?{ COUNT(?o) } } . GENERATE { ex:s ex:first ?o } ORDER BY ?o LIMIT 1 . }
+} WHERE { VALUES (?g ?o) { (ex:g1 1) (ex:g2 2) (ex:g1 3) (ex:g2 4) (ex:g2 5) } }

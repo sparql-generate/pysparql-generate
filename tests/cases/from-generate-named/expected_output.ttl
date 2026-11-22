@@ -1,0 +1,6 @@
+<http://ex.org/c> <http://ex.org/v> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/b> <http://ex.org/v> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/c> <http://ex.org/in> <urn:g2> .
+<http://ex.org/a> <http://ex.org/in> <urn:g1> .
+<http://ex.org/a> <http://ex.org/v> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/b> <http://ex.org/in> <urn:g1> .

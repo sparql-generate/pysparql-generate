@@ -1,0 +1,4 @@
+<http://ex.org/who2> <http://ex.org/graph> <http://ex.org/g2> .
+<http://ex.org/who1> <http://ex.org/graph> <http://ex.org/g1> .
+<http://ex.org/who2> <http://ex.org/val> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who1> <http://ex.org/val> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .

@@ -1,0 +1,1 @@
+{"query": "query.rqg", "namedqueries": [{"uri": "http://ex.org/sub.rqg", "path": "sub.rqg", "mediatype": "application/vnd.sparql-generate"}]}

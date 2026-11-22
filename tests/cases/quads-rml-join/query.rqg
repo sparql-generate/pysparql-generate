@@ -1,0 +1,12 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A referencing object map with a graph map: the join through FROM GENERATE, the quad in the graph of the child
+GENERATE {
+  GENERATE { GRAPH ?g { ?s ex:dept ?o } }
+  FROM GENERATE {
+    GENERATE { ?o ex:key ?k . } ITERATOR iter:CSV(<depts.csv>, "dept", "label") AS ?dept ?label WHERE { BIND(IRI(CONCAT("http://ex.org/dept/", ?dept)) AS ?o) BIND(STR(?dept) AS ?k) } .
+    GENERATE { ?s ex:ref ?k . ?s ex:graph ?gg } ITERATOR iter:CSV(<people.csv>, "id", "name", "dept") AS ?id ?name ?dept WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?s) BIND(STR(?dept) AS ?k) BIND(IRI(CONCAT("http://ex.org/g/", ?name)) AS ?gg) } .
+  } .
+  WHERE { ?s ex:ref ?x ; ex:graph ?g . ?o ex:key ?x . } .
+} WHERE {}

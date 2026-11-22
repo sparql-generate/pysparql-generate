@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# Graph names computed by expressions: an IRI with embedded expressions, ?{ expr }
+GENERATE { GRAPH <http://ex.org/g{?o}> { ex:s ex:p ?o } GRAPH ?{ IRI(CONCAT("http://ex.org/h", STR(?o * 10))) } { ex:s ex:q ?o } } WHERE { VALUES ?o { 1 2 } }

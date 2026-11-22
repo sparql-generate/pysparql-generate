@@ -1,0 +1,8 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# Default and named graphs generated together, queried with and without GRAPH
+GENERATE { ?s ex:inDefault ?o . ?t ex:inNamed ?g }
+FROM GENERATE { ex:a ex:p 1 } .
+FROM GENERATE { ex:b ex:p 2 } NAMED <urn:g> .
+WHERE { { ?s ex:p ?o } UNION { GRAPH ?g { ?t ex:p ?x } } }

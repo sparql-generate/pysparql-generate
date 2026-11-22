@@ -1,0 +1,3 @@
+<http://ex.org/d/10> <http://ex.org/member> "Alice" .
+<http://ex.org/d/20> <http://ex.org/member> "Bob" .
+<http://ex.org/d/10> <http://ex.org/member> "Carol" .

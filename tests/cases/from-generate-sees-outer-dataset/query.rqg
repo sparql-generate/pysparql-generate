@@ -1,0 +1,9 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# The sub-query of FROM GENERATE in a sub-GENERATE queries the dataset of the enclosing level
+GENERATE {
+  GENERATE { ?s ex:r ?o } FROM GENERATE { ?s ex:q ?o } WHERE { ?s ex:p ?o } . WHERE { ?s ex:q ?o } .
+}
+FROM <a.ttl>
+WHERE {}

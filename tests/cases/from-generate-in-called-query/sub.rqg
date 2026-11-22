@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+GENERATE <http://ex.org/sub.rqg>(?n) { ?s ex:q ?o } FROM GENERATE { ex:x ex:p ?n . ex:y ex:p ?{ ?n * 10 } } . WHERE { ?s ex:p ?o }

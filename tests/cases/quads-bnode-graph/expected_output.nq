@@ -1,0 +1,6 @@
+<http://ex.org/s> <http://ex.org/p> "1"^^<http://www.w3.org/2001/XMLSchema#integer> _:Bcc761977X2D88f3X2D4ff5X2Da26eX2D216148a2c2b3 .
+_:Bdb83c38bX2Da855X2D44c0X2Db532X2D61ae3c6f2996 <http://ex.org/p> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:Bdb83c38bX2Da855X2D44c0X2Db532X2D61ae3c6f2996 <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/p> "2"^^<http://www.w3.org/2001/XMLSchema#integer> _:B1c4c313bX2D63a3X2D4a53X2D9263X2D830e8f17b9c1 .
+_:Be47edca6X2D10c6X2D4c39X2D8035X2Dc6352080c947 <http://ex.org/p> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:Be47edca6X2D10c6X2D4c39X2D8035X2Dc6352080c947 <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .

@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A named query called from GRAPH blocks generates its default graph there; its own GRAPH blocks stay
+GENERATE { GENERATE <http://ex.org/q.rqg>(?o) . GRAPH ex:g { GENERATE <http://ex.org/q.rqg>(?o) . } GRAPH ?h { GENERATE <http://ex.org/q.rqg>(?o) . } } WHERE { VALUES (?o ?h) { (1 ex:h) (2 ex:h2) } }

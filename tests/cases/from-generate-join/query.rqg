@@ -1,0 +1,12 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# The join of two CSV files through FROM GENERATE (the form of the RML translation)
+GENERATE {
+  GENERATE { ?s ex:dept ?o . } 
+  FROM GENERATE {
+    GENERATE { ?o ex:key ?k . } ITERATOR iter:CSV(<depts.csv>, "dept", "label") AS ?dept ?label WHERE { BIND(IRI(CONCAT("http://ex.org/dept/", ?dept)) AS ?o) BIND(STR(?dept) AS ?k) } .
+    GENERATE { ?s ex:ref ?k . } ITERATOR iter:CSV(<people.csv>, "id", "name", "dept") AS ?id ?name ?dept WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?s) BIND(STR(?dept) AS ?k) } .
+  } .
+  WHERE { ?s ex:ref ?x . ?o ex:key ?x . } .
+} WHERE {}

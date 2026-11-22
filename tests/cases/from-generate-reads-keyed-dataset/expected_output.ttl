@@ -1,0 +1,6 @@
+<http://ex.org/who3> <http://ex.org/r> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who2> <http://ex.org/r> "20"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who2> <http://ex.org/r> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who1> <http://ex.org/r> "10"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who1> <http://ex.org/r> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/who3> <http://ex.org/r> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .

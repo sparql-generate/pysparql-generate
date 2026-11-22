@@ -1,0 +1,8 @@
+# An aggregate in a nested GENERATE ranges over the solutions derived from all parents
+# (2 parents x 2 values of ?j = 4); grouping by the parent's variable gives per-parent counts.
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX ex: <http://ex.org/>
+GENERATE {
+  GENERATE { ex:all ex:n ?{ COUNT(?j) } } ITERATOR iter:for(1,1,3) AS ?j WHERE {} .
+  GENERATE { <http://ex.org/s{STR(?i)}> ex:n ?{ COUNT(?j) } } ITERATOR iter:for(1,1,3) AS ?j WHERE {} GROUP BY ?i .
+} WHERE { VALUES ?i { 1 2 } }

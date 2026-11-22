@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A blank node names a graph; a blank node label is shared by the default graph and the GRAPH blocks of a solution
+GENERATE { GRAPH ?g { ex:s ex:p ?o } _:b ex:p ?o . GRAPH ex:g { _:b ex:q ?o } } WHERE { VALUES ?o { 1 2 } BIND(BNODE() AS ?g) }

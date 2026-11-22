@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# FROM GENERATE of a named GENERATE query with arguments
+GENERATE { ?s ex:q ?o }
+FROM GENERATE <http://ex.org/gen.rqg>(5) .
+WHERE { ?s ex:p ?o }

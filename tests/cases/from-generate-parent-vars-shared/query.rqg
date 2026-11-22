@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# Parent solutions that agree on the variables a FROM GENERATE reads share a dataset
+GENERATE {
+  GENERATE { ?who ex:sees ?o } FROM GENERATE { ex:x ex:v ?k } . WHERE { ex:x ex:v ?o } .
+} ITERATOR iter:for(1,1,6) AS ?i WHERE { BIND(?i - 3 * FLOOR(?i / 3) AS ?k) BIND(IRI(CONCAT("http://ex.org/who", STR(?i))) AS ?who) }

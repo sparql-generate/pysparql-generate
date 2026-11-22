@@ -1,0 +1,6 @@
+<http://ex.org/x> <http://ex.org/q> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/y> <http://ex.org/q> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/y> <http://ex.org/q> "20"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/x> <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/y> <http://ex.org/q> "10"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/x> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .

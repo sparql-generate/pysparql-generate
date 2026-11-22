@@ -1,0 +1,19 @@
+<http://ex.org/s> <http://ex.org/p> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/p> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/p> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/r> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .
+<http://ex.org/s> <http://ex.org/q> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/r> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .
+<http://ex.org/s> <http://ex.org/q> "4"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+<http://ex.org/s> <http://ex.org/r> "4"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .
+<http://ex.org/t> <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/v1> .
+<http://ex.org/t> <http://ex.org/deep> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/v1> .
+<http://ex.org/t> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/v2> .
+<http://ex.org/t> <http://ex.org/deep> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/v2> .
+<http://ex.org/u> <http://ex.org/p> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/u> <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .
+<http://ex.org/u> <http://ex.org/p> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/u> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .
+<http://ex.org/u> <http://ex.org/p> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/u> <http://ex.org/q> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/h> .

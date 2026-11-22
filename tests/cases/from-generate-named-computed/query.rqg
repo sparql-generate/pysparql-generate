@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# FROM GENERATE ... NAMED with a graph name computed from a parent variable
+GENERATE {
+  GENERATE { ?who ex:graph ?g . ?who ex:val ?o } FROM GENERATE { ex:x ex:v ?i } NAMED <http://ex.org/g{?i}> . WHERE { GRAPH ?g { ex:x ex:v ?o } } .
+} ITERATOR iter:for(1,1,3) AS ?i WHERE { BIND(IRI(CONCAT("http://ex.org/who", STR(?i))) AS ?who) }

@@ -1,0 +1,8 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A sub-query of a GRAPH block generates its default graph in that graph, its own GRAPH blocks override it
+GENERATE {
+  GRAPH ex:g { ex:s ex:p ?o . GENERATE { ex:s ex:q ?j . GRAPH ex:h { ex:s ex:r ?j } } WHERE { BIND(?o + 1 AS ?j) } . }
+  GRAPH ?v { GENERATE { ex:t ex:q ?o . GENERATE { ex:t ex:deep ?o } . } . }
+  GENERATE { ex:u ex:p ?o . GRAPH ex:h { ex:u ex:q ?o } } .
+} WHERE { VALUES (?v ?o) { (ex:v1 1) (ex:v2 2) (UNDEF 3) } }

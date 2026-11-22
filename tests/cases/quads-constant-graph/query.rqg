@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# GRAPH with an IRI
+GENERATE { GRAPH ex:g { ex:s ex:p ?o } } WHERE { VALUES ?o { 1 2 } }

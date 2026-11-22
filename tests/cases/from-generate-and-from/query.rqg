@@ -1,0 +1,8 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# FROM <document> and FROM GENERATE: the default graph is their merge
+GENERATE { ?s ex:q ?o }
+FROM <a.ttl>
+FROM GENERATE { ex:c ex:p 3 . ex:a ex:p 1 } .
+WHERE { ?s ex:p ?o }

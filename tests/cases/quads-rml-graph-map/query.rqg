@@ -1,0 +1,19 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# The form of a translated RML graph map: GRAPH blocks in nested sub-GENERATEs, the graph computed from iterator variables
+GENERATE {
+  GENERATE {
+    ?s a ex:Person .
+    GRAPH ?g { ?s ex:name ?name }
+    GRAPH <http://ex.org/dept/{?dept}> { ?s ex:dept ?d }
+    GENERATE { ?s ex:inDept ?d } .
+  }
+  ITERATOR iter:CSV(<people.csv>, 2, "id", "name", "dept") AS ?id ?name ?dept
+  WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?s) BIND(IRI(CONCAT("http://ex.org/g/", ?id)) AS ?g) BIND(IRI(CONCAT("http://ex.org/d/", ?dept)) AS ?d) } .
+  GENERATE {
+    GRAPH ?gd { GENERATE { ?d ex:label ?label } . }
+  }
+  ITERATOR iter:CSV(<depts.csv>, "dept", "label") AS ?dept ?label
+  WHERE { BIND(IRI(CONCAT("http://ex.org/d/", ?dept)) AS ?d) BIND(IF(?dept = "40", ?undef, IRI(CONCAT("http://ex.org/dg/", ?dept))) AS ?gd) } .
+} WHERE {}

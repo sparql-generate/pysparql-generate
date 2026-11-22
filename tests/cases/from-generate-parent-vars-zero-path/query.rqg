@@ -1,0 +1,8 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# Zero-length paths on datasets per parent solution, an empty one included
+GENERATE {
+  GENERATE { ?who ex:reach ?t } FROM GENERATE { ex:n0 ex:next ?end } WHERE { FILTER(?i != 2) } . WHERE { ex:n0 ex:next* ?t } .
+  GENERATE { ?who ex:node ?t } FROM GENERATE { ex:n0 ex:next2 ?end } WHERE { FILTER(?i != 2) } . WHERE { ?t ex:next2? ?t } .
+} ITERATOR iter:for(1,1,4) AS ?i WHERE { BIND(IRI(CONCAT("http://ex.org/who", STR(?i))) AS ?who) BIND(IRI(CONCAT("http://ex.org/end", STR(?i))) AS ?end) }

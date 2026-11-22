@@ -1,0 +1,7 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# Named graphs of a generated dataset copied to the output by GRAPH ?g in WHERE and in the template
+GENERATE { GRAPH ?g { ?s ?p ?o } }
+FROM GENERATE { ex:a ex:p 1 } NAMED ex:g1 .
+FROM GENERATE { ex:b ex:p 2 } NAMED ex:g2 .
+WHERE { GRAPH ?g { ?s ?p ?o } }

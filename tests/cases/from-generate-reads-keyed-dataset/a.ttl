@@ -1,0 +1,2 @@
+@prefix ex: <http://ex.org/> .
+ex:a ex:p 1 . ex:b ex:p 2 .

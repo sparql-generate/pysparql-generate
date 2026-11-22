@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# GRAPH ?g: one graph per value; an unbound or literal graph gives no quad
+GENERATE { ex:s ex:p ?o . GRAPH ?g { ex:s ex:q ?o } } WHERE { VALUES (?g ?o) { (ex:g1 1) (ex:g2 2) (UNDEF 3) ("g" 4) } }

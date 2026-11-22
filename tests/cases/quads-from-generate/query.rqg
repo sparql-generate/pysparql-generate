@@ -1,0 +1,4 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A FROM GENERATE gives one graph: the quads of its GRAPH blocks are ignored
+GENERATE { ?s ex:found ?p } FROM GENERATE { ex:s ex:p 1 . GRAPH ex:g { ex:s ex:q 1 } } . WHERE { ?s ?p ?o }

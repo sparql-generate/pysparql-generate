@@ -1,0 +1,5 @@
+<http://ex.org/who1> <http://ex.org/sees> "1.0"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+<http://ex.org/who3> <http://ex.org/sees> "0.0"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+<http://ex.org/who4> <http://ex.org/sees> "1.0"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+<http://ex.org/who5> <http://ex.org/sees> "2.0"^^<http://www.w3.org/2001/XMLSchema#decimal> .
+<http://ex.org/who2> <http://ex.org/sees> "2.0"^^<http://www.w3.org/2001/XMLSchema#decimal> .

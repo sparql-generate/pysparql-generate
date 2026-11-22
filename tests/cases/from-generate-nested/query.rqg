@@ -1,0 +1,9 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A FROM GENERATE whose sub-query has its own FROM GENERATE
+GENERATE { ?s ex:r ?o }
+FROM GENERATE {
+  GENERATE { ?s ex:q ?n } FROM GENERATE { ex:a ex:p 1 . ex:b ex:p 2 } . WHERE { ?s ex:p ?o BIND(?o + 100 AS ?n) } .
+} .
+WHERE { ?s ex:q ?o }

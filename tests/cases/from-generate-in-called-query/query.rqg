@@ -1,0 +1,5 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# A named query called with several arguments, whose FROM GENERATE reads them
+GENERATE { GENERATE <http://ex.org/sub.rqg>(?i) . } ITERATOR iter:for(1,1,4) AS ?i WHERE {}

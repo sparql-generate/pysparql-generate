@@ -1,0 +1,7 @@
+<http://ex.org/s> <http://ex.org/p> _:Bfc43ead5X2Db0e7X2D4430X2Db446X2D5a5474d31559 <http://ex.org/g> .
+_:Bfc43ead5X2Db0e7X2D4430X2Db446X2D5a5474d31559 <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+_:Bfc43ead5X2Db0e7X2D4430X2Db446X2D5a5474d31559 <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> _:B16d484d9X2De1edX2D4eb0X2DadeaX2D94b26fcc3f7f <http://ex.org/g> .
+_:B16d484d9X2De1edX2D4eb0X2DadeaX2D94b26fcc3f7f <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+_:B16d484d9X2De1edX2D4eb0X2DadeaX2D94b26fcc3f7f <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> _:B42b1c08bX2Df790X2D43adX2Dad62X2D23919a09ccde <http://ex.org/g> .
+_:B42b1c08bX2Df790X2D43adX2Dad62X2D23919a09ccde <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://ex.org/g> .
+_:B42b1c08bX2Df790X2D43adX2Dad62X2D23919a09ccde <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> <http://ex.org/g> .

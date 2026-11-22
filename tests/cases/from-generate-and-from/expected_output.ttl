@@ -1,0 +1,3 @@
+<http://ex.org/b> <http://ex.org/q> "2"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/a> <http://ex.org/q> "1"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://ex.org/c> <http://ex.org/q> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .

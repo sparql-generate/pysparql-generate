@@ -1,0 +1,11 @@
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# OPTIONAL, FILTER and a property path on a generated dataset
+GENERATE { ?s ex:name ?n ; ex:label ?l . ?s ex:reach ?t }
+FROM GENERATE {
+  GENERATE { ?p ex:name ?name ; ex:dept ?d . ?p ex:next ?q } ITERATOR iter:CSV(<people.csv>, "id", "name", "dept") AS ?id ?name ?dept WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?p) BIND(IRI(CONCAT("http://ex.org/p/", STR(xsd:integer(?id) + 1))) AS ?q) BIND(IRI(CONCAT("http://ex.org/d/", ?dept)) AS ?d) } .
+  GENERATE { ?d ex:label ?label } ITERATOR iter:CSV(<depts.csv>, "dept", "label") AS ?dept ?label WHERE { BIND(IRI(CONCAT("http://ex.org/d/", ?dept)) AS ?d) } .
+} .
+WHERE { ?s ex:name ?n ; ex:dept ?d . OPTIONAL { ?d ex:label ?l } FILTER(?n != "Bob") ?s ex:next+ ?t }
