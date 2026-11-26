@@ -26,5 +26,5 @@ isomorphism).
 
 Every case of this directory was run again on 2026-11-26 with the Java engine 2.5.0 (release
 JAR): its output is the expected one (graph or dataset isomorphism), the `quads-*` cases
-included; the cases above, which need 2.6.0 (`RAISE`, `iter:CSVHeaders` on an IRI), with the
-Java engine 2.6.0.
+included. Every case was run again on 2026-11-26 with the Java engine 2.6.0 (release JAR):
+its output is the expected one, or its error the expected message.

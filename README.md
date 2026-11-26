@@ -231,16 +231,33 @@ run time is evaluated iteratively, in `BIND`, `FILTER` and the binding clauses.
 
 ```sh
 pytest                                   # unit tests + the Java test cases (if ../sparql-generate is checked out)
-python scripts/conformance.py [-v]       # the 51 Java test cases, compared by graph or dataset isomorphism
+python scripts/conformance.py [-v]       # the 53 Java test cases, compared by graph or dataset isomorphism
 python scripts/bench.py --sizes 10000 100000 1000000   # against the Java CLI (JDK >= 17)
 ```
 
-All 51 test cases of the Java implementation 2.5.0 pass (50 offline; `capital`
-fetches a document from the Web). On the queries that the RML translator
-[rml-to-sparql-generate](https://github.com/sparql-generate/rml-to-sparql-generate) 0.2.0
-writes for the RML test suites (rml-test-cases, rml-core and the modules rml-io, rml-fnml,
-rml-cc, rml-star, rml-lv), the output is the Java engine 2.5.0's, case by case, by RDF dataset
-isomorphism. Where the Java engine 2.2 diverged from the
+All 53 test cases of the Java implementation 2.6.0 pass (52 offline; `capital`
+fetches a document from the Web; `raise-data-error` expects the message of a `RAISE`).
+On the queries that the RML translator
+[rml-to-sparql-generate](https://github.com/sparql-generate/rml-to-sparql-generate) 0.3.0
+writes for the RML test suites, run by the conformance harness of
+[kgc-bench](https://github.com/sparql-generate/kgc-bench) (`--graphs-to-files` or
+`--targets` for the logical targets of RML-IO), every case has the status of the Java engine
+2.6.0, and its output and target files are the Java engine's, by RDF dataset isomorphism
+(where an error stops the execution, the Java engine leaves an empty output file, this
+implementation none):
+
+| suite | cases | PASS | FAIL |
+|---|---|---|---|
+| RMLio/rml-test-cases@803dd3ec (CSV, JSON, XML) | 117 | 115 | 2 |
+| kg-construct/rml-core@82ab28d4 | 76 | 75 | 1 |
+| kg-construct/rml-io@0cb26a2 | 73 | 64 | 9 |
+| kg-construct/rml-fnml@f573f79 | 22 | 22 | 0 |
+| kg-construct/rml-cc@d97fddf | 35 | 35 | 0 |
+| kg-construct/rml-lv@94beb94 | 41 | 40 | 1 |
+| kg-construct/rml-star@711f72e | 18 | 18 | 0 |
+
+The translated GTFS-Madrid-Bench mapping gives the Java engine's set of triples (395,953 at
+scale 1, 3,959,530 at scale 10). Where the Java engine 2.2 diverged from the
 documented behaviour of the language, this implementation follows the documentation
 (these divergences are fixed in later Java releases):
 ill-formed triples are dropped, `VALUES` in `WHERE` works with input bindings,
@@ -249,7 +266,7 @@ of a query called on several rows reads one dataset per row group. A nested
 `GENERATE` is evaluated once on the table of all parent solutions (its `LIMIT`,
 `DISTINCT` and aggregates range across parents), as the Java
 engine does; `tests/cases/` holds cases whose expected outputs come from the
-Java engine 2.2.0-SNAPSHOT. `BNODE(str)` gives one blank node per string and input
+Java engine, each checked against the Java engine 2.6.0. `BNODE(str)` gives one blank node per string and input
 row of the operator that evaluates it (two `BIND`s give two nodes), as SPARQL and
 Jena read it.
 
