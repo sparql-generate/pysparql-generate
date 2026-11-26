@@ -513,8 +513,9 @@ _IRIREF_FORBIDDEN = __import__("re").compile(r'[\x00-\x20<>"{}|^`\\]')
 @register("unsafeIRI")
 def fun_unsafe_iri(ctx, args):
     """``fun:unsafeIRI(s)`` (the Java engine 2.6.1, for ``rml:UnsafeIRI``): a string that starts
-    with a scheme is the IRI as it is, neither validated nor resolved (white space allowed);
-    an IRI stays; another term is an evaluation error (unbound).  Such an IRI is a dynamic
+    with a scheme (the lexical form of any literal) is the IRI as it is, neither validated nor
+    resolved (white space allowed); an IRI stays; another term is an evaluation error
+    (unbound); the Java engine's ``FUN_unsafeIRI`` (fix-2.6.1 ``6cb4cd0``).  Such an IRI is a dynamic
     term, written in N-Triples with its forbidden characters as ``\\uXXXX``
     (``sg_any_nt``)."""
     if len(args) != 1:
@@ -525,20 +526,21 @@ def fun_unsafe_iri(ctx, args):
         return NULL
     if k == "iri":
         return e
-    if e.is_const and e.type.is_stringy:
+    if k in ("int", "double", "bool"):
+        return NULL  # a number or a boolean has no scheme
+    if e.is_const and k in ("str", "lang", "typed"):
         s = str(e.const)
         if not _SCHEME.match(s):
             return NULL
         if not _IRIREF_FORBIDDEN.search(s):
             return const_iri(s)
         return CExpr(f"sg_any(0, {sql_string(s)}, NULL)", ANY_T)
-    if e.type.is_stringy:
-        v = string_literal_lex(e)
+    if k in ("str", "lang", "typed"):  # any literal: its lexical form
+        v = lex(e)
         return CExpr(f"CASE WHEN regexp_matches({v}, '^[A-Za-z][A-Za-z0-9+.-]*:') THEN sg_any(0, {v}, NULL) END",
                      ANY_T)
     if k == "any":
         x = e.sql
-        return CExpr(f"CASE WHEN ({x}).k = 0 THEN {x} WHEN ({x}).k = 2 AND (({x}).d IS NULL OR ({x}).d = "
-                     f"{sql_string(A.XSD_STRING)} OR starts_with(({x}).d, '@')) AND regexp_matches(({x}).v, "
+        return CExpr(f"CASE WHEN ({x}).k = 0 THEN {x} WHEN ({x}).k = 2 AND regexp_matches(({x}).v, "
                      f"'^[A-Za-z][A-Za-z0-9+.-]*:') THEN sg_any(0, ({x}).v, NULL) END", ANY_T)
     return NULL

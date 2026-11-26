@@ -475,3 +475,20 @@ def test_xpath_prefixes_of_the_document():
                      XP + f'GENERATE {{ GENERATE {{ ?s ex:name ?name }} ITERATOR ite:XPath(?c, "/*/ex:name/text()") AS ?name '
                      f'ITERATOR ite:XPath(?c, "/*/@id") AS ?id WHERE {{ BIND(IRI(CONCAT("http://ex/c", ?id)) AS ?s) }} . }} '
                      f'ITERATOR ite:XPath("{xml}", "//Friends/ex:Character") AS ?c')
+
+
+def test_unsafe_iri_java_cases():
+    """UnsafeIRIFunctionTest of the Java engine (fix-2.6.1 6cb4cd0)."""
+    pre = "PREFIX fun: <http://w3id.org/sparql-generate/fn/> "
+    subjects = sorted(s for s, _, _ in sg.generate(
+        pre + 'GENERATE { ?s a <http://ex/C> } WHERE { VALUES ?v { "http://ex/Emily Smith" "http://ex/Bob/Charles" '
+              '"http://ex/Zoë Krüger" } BIND(fun:unsafeIRI(?v) AS ?s) }'))
+    assert subjects == ["<http://ex/Bob/Charles>", "<http://ex/Emily\\u0020Smith>", "<http://ex/Zoë\\u0020Krüger>"]
+    assert list(sg.generate('GENERATE { ?s a <http://ex/C> } WHERE { BIND(IRI("http://ex/Emily Smith") AS ?s) }')) == []
+    assert list(sg.generate(pre + 'BASE <http://ex/> GENERATE { ?s a <http://ex/C> } '
+                                  'WHERE { BIND(fun:unsafeIRI("Emily Smith") AS ?s) }')) == []
+    assert [s for s, _, _ in sg.generate(pre + "GENERATE { ?s a <http://ex/C> } "
+                                               "WHERE { BIND(fun:unsafeIRI(<http://ex/a>) AS ?s) }")] == ["<http://ex/a>"]
+    assert [s for s, _, _ in sg.generate(pre + 'GENERATE { ?s a <http://ex/C> } WHERE { BIND(fun:unsafeIRI('
+                                               '"http://ex/x"^^<http://www.w3.org/2001/XMLSchema#anyURI>) AS ?s) }')] == \
+        ["<http://ex/x>"]
