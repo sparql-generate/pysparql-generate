@@ -266,7 +266,8 @@ class Compiler:
         self.triple_tag: Optional[str] = None
 
     def library_function(self, iri: str):
-        """``(signature, body)`` of the FUNCTION named ``iri`` in the library, or None."""
+        """``(signature, body, base)`` of the FUNCTION named ``iri`` in the library, or None:
+        the body is evaluated against the base of the function (the Java engine 2.6.1)."""
         if iri not in self._functions:
             self._functions[iri] = None
             text = self.engine.named_query_text(iri, fetch=False)
@@ -278,7 +279,7 @@ class Compiler:
                 except Exception:  # noqa: BLE001 - not a query: not a function
                     q = None
                 if q is not None and q.kind == "FUNCTION":
-                    self._functions[iri] = (q.signature or [], q.function_expr)
+                    self._functions[iri] = (q.signature or [], q.function_expr, q.base or self.engine.base)
         return self._functions[iri]
 
     # -- entry points ----------------------------------------------------------------
@@ -497,6 +498,11 @@ class Compiler:
         if iri == CALL_SELECT:
             return self.compile_call_select(ctx, rel, clause)
         impl = ITERATORS.get(iri)
+        if impl is None and self.engine.named_query_text(iri, fetch=False) is not None:
+            # a named SELECT query called as an iterator, ``ITERATOR <u>(e1..ek)``: the Java
+            # engine's IteratorFunctionRegistry loads it as iter:call-select(<u>, e1..ek)
+            call = A.Call(CALL_SELECT, (A.IRI(iri),) + tuple(clause.expr.args))
+            return self.compile_call_select(ctx, rel, A.IteratorClause(call, clause.vars))
         if impl is None:
             raise CompileError(f"unknown iterator function <{iri}>")
         args = [compile_expr(a, ctx) for a in clause.expr.args]
@@ -684,7 +690,7 @@ class Compiler:
                 exprs = [cctx.scope[n] for n in cctx.scope if not n.startswith("\x00")]
             else:
                 exprs = [compile_expr(e, cctx) if e is not None else cctx.lookup(v) for v, e in called.select_vars]
-            osel = [f"{cctx.prid.sql} AS {p}ck"]
+            osel = [f"{cctx.prid.sql} AS {p}ck", f"row_number() OVER () AS {p}os"]
             osel += [f"{'NULL' if e.is_null else e.sql} AS {p}o{j}" for j, e in enumerate(exprs)]
             out = self.engine.fresh("csout")
             self.engine.execute(f"CREATE TEMP TABLE {out} AS SELECT {', '.join(osel)} FROM {table}")
@@ -708,13 +714,17 @@ class Compiler:
                     sel.append(f"{coerce(CExpr(f'{p}o{j}', exprs[j].type), t)} AS {cols[j]}")
                 else:
                     sel.append(f"NULL AS {cols[j]}")
-            drop = ", ".join(own + [f"{p}o{j}" for j in range(len(exprs))])
-            parts.append(f"SELECT * EXCLUDE ({drop}){''.join(', ' + s for s in sel)} FROM ({joined})")
+            drop = ", ".join(own + [f"{p}o{j}" for j in range(len(exprs))] + [f"{p}os"])
+            parts.append(f"SELECT * EXCLUDE ({drop}){''.join(', ' + s for s in sel)}, {p}cr AS {p}ocr, "
+                         f"{p}os AS {p}oos FROM ({joined})")
         for j, v in enumerate(clause.vars):
             ctx.scope[v.name] = NULL if types[j] is None else CExpr(cols[j], types[j])
         if not parts:
             return Rel(f"(SELECT * EXCLUDE ({', '.join(own)}) FROM {rows} WHERE FALSE)")
-        return Rel("(" + " UNION ALL ".join(f"({x})" for x in parts) + ")")
+        # the rows in their order, each followed by the solutions of its call in their order (the
+        # order of the Java engine's iterator, which a TEMPLATE shows)
+        union = " UNION ALL ".join(f"({x})" for x in parts)
+        return Rel(f"(SELECT * EXCLUDE ({p}ocr, {p}oos) FROM ({union}) ORDER BY {p}ocr, {p}oos)")
 
     # -- WHERE ----------------------------------------------------------------------------
     def compile_group(self, ctx: LevelContext, rel: Rel, group: A.Group) -> Rel:

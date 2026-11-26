@@ -116,12 +116,12 @@ def test_iter_sql(tmp_path, kind):
          'AS ?id ?name ?score ?ok WHERE {} ORDER BY ?id')
     got = sg.select(P + q)
     X = "^^<http://www.w3.org/2001/XMLSchema#"
-    assert got[0] == {"id": f'"1"{X}integer>', "name": '"Ada"', "score": f'"1.5e0"{X}double>', "ok": (
+    assert got[0] == {"id": f'"1"{X}integer>', "name": '"Ada"', "score": f'"1.5E0"{X}double>', "ok": (
         f'"true"{X}boolean>' if kind == "duckdb" else f'"1"{X}integer>')}
     assert got[1]["score"] is None
     if kind == "duckdb":
         (b,) = [r["b"] for r in sg.select(P + f'SELECT ?b ITERATOR iter:SQL(<jdbc:duckdb:{path}>, "SELECT born FROM p WHERE id = 1") AS ?b WHERE {{}}')]
         assert b == f'"1815-12-10"{X}date>'
-    # a bad query: no solution, a warning
-    with sg.Execution(P + f'SELECT ?x ITERATOR iter:SQL(<jdbc:{kind}:{path}>, "SELECT nope FROM p") AS ?x WHERE {{}}') as ex:
-        assert list(ex.rows()) == [] and ex.warnings
+    # a query that the database rejects: an error that stops the execution (the Java engine 2.6.1)
+    with pytest.raises(sg.RaiseError, match="^SQL error: "):
+        sg.select(P + f'SELECT ?x ITERATOR iter:SQL(<jdbc:{kind}:{path}>, "SELECT nope FROM p") AS ?x WHERE {{}}')

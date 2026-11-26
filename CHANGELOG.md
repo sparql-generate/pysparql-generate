@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased (branch `next`)
+
+Parity with the Java engine 2.6.1 (branch `fix-2.6.1`) and the RML translator
+rml-to-sparql-generate `next`.
+
+- `iter:SQL` reads relational databases as R2RML does, as the Java engine 2.6.1: the
+  database is a JDBC URL, an IRI or a string, of PostgreSQL (psycopg2), MySQL (PyMySQL, with
+  Connector/J's `sessionVariables`), SQL Server (pyodbc and Microsoft's ODBC driver), SQLite
+  or DuckDB, with the user and the password in the URL (`?user=…&password=…`,
+  `;user={…};password={…}`); the drivers are the extra `pip install pysparql-generate[sql]`.
+  The names of the columns follow the query (the label, exactly, else regardless of case); a
+  name that no column has, or that several have, and a query that the database rejects, are
+  errors that stop the execution (`RaiseError`, `SQL error: …`); a database that cannot be
+  reached gives no row with a warning, as a missing document (`--fail-on-missing`: an error).
+  Each cell is its natural RDF literal in canonical form (`xsd:integer`, `xsd:decimal`
+  `30.0`, `xsd:double` `8.025E1`, a `REAL` from its single precision value, `xsd:boolean`
+  also for `BIT(1)` and MySQL's `TINYINT(1)`, `xsd:date`, `xsd:time`, `xsd:dateTime` without
+  a zero fraction, `xsd:hexBinary` in upper case, `CHAR(n)` padded), `NULL` unbound.
+- `iter:CSVStrict(doc, [batch size], "col"...)`: the CSV of RML-IO, as univocity reads it in
+  the Java engine; an empty cell is the empty string; a row with another number of fields
+  than the header, or a column absent from it, is a data error that stops the execution.
+- `iter:SPARQL(doc, query, "var"...)`: the solutions of a SPARQL SELECT query on an RDF
+  document (pyoxigraph, else rdflib), then the position of the solution.
+- `iter:XPath`: a sub-query that does not start with `/` is evaluated from the matched node
+  in its document, so that the parent and ancestor axes reach outside it (`../@id`).
+- `fun:unsafeIRI(s)`: a string that starts with a scheme is the IRI as it is, neither
+  validated nor resolved (white space allowed), written in N-Triples with `\u0020` escapes.
+- `ITERATOR <q>(args)`: a named SELECT query called as an iterator, as
+  `iter:call-select(<q>, args)`; the rows keep their order, each followed by the solutions of
+  its call in their order.
+- The body of a `FUNCTION` resolves relative IRIs against the base of the function, its
+  arguments against the base of the caller.
+- `scripts/conformance.py` compares a `TEMPLATE` case with `expected_output.txt`.
+
 ## 0.3.0 (2026-11-26)
 
 Parity with the Java engine 2.6.0 and the RML translator rml-to-sparql-generate 0.3.0.

@@ -375,9 +375,13 @@ CREATE OR REPLACE MACRO sg_any_str(x) AS CASE WHEN x.k = 2 AND (x.d IS NULL OR x
 CREATE OR REPLACE MACRO sg_any_num(x) AS CASE WHEN x.k = 2 AND x.d IN ({", ".join(sql_string(d) for d in sorted(NUMERIC_DATATYPES))}) THEN TRY_CAST(x.v AS DOUBLE) ELSE NULL END;
 CREATE OR REPLACE MACRO sg_any_dt(x) AS CASE WHEN x.k <> 2 THEN NULL WHEN x.d IS NULL THEN '{A.XSD_STRING}' WHEN x.d LIKE '@%' THEN '{A.RDF_LANGSTRING}' ELSE x.d END;
 CREATE OR REPLACE MACRO sg_any_lang(x) AS CASE WHEN x.k = 2 AND x.d LIKE '@%' THEN substr(x.d, 2) WHEN x.k = 2 THEN '' ELSE NULL END;
+-- an IRI that fun:unsafeIRI made (white space allowed) in N-Triples: the characters that an IRIREF
+-- forbids as UCHAR escapes (a backslash cannot be escaped: kept)
+CREATE OR REPLACE MACRO sg_iri_nt_escape(x) AS CASE WHEN NOT regexp_matches(x, '[\\x00-\\x20<>"{{}}|^`]') THEN x
+    ELSE replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(x, ' ', '\\u0020'), chr(9), '\\u0009'), chr(10), '\\u000A'), chr(13), '\\u000D'), '<', '\\u003C'), '>', '\\u003E'), '"', '\\u0022'), '{{', '\\u007B'), '}}', '\\u007D'), '|', '\\u007C'), '^', '\\u005E'), '`', '\\u0060') END;
 CREATE OR REPLACE MACRO sg_any_nt(x, pos) AS CASE
     WHEN x IS NULL THEN NULL
-    WHEN x.k = 0 THEN '<' || x.v || '>'
+    WHEN x.k = 0 THEN '<' || sg_iri_nt_escape(x.v) || '>'
     WHEN pos = 'p' THEN NULL
     WHEN x.k = 1 THEN '_:' || x.v
     WHEN x.k = 3 THEN x.v

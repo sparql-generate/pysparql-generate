@@ -42,6 +42,9 @@ def run_case(d: str, allow_network: bool, verbose: bool):
         ds = rdflib.Dataset(default_union=False)
         ds.parse(trig_path, format="trig")
         return run_quads_case(text, conf, None, allow_network, verbose, expected=ds.serialize(format="nquads"))
+    txt_path = os.path.join(d, "expected_output.txt")
+    if os.path.exists(txt_path):  # a TEMPLATE query: its text, exactly
+        return run_text_case(text, conf, txt_path, allow_network)
     t0 = time.perf_counter()
     with sg.Execution(text, conf=conf, allow_network=allow_network) as ex:
         got = ex.to_graph()
@@ -71,7 +74,7 @@ def run_error_case(text, conf, err_path, allow_network):
     t0 = time.perf_counter()
     try:
         with sg.Execution(text, conf=conf, allow_network=allow_network) as ex:
-            ex.to_dataset()
+            ex.text() if ex.plan.kind == "TEMPLATE" else ex.to_dataset()
     except sg.RaiseError as e:
         got = str(e)
     else:
@@ -79,6 +82,18 @@ def run_error_case(text, conf, err_path, allow_network):
     dt = time.perf_counter() - t0
     detail = "" if got == expected else f"\n    expected the error {expected!r}, got {got!r}"
     return got == expected, 0, 0, dt, detail
+
+
+def run_text_case(text, conf, txt_path, allow_network):
+    """A TEMPLATE query: its output is the content of ``expected_output.txt``, exactly."""
+    with open(txt_path, encoding="utf-8", newline="") as f:
+        expected = f.read()
+    t0 = time.perf_counter()
+    with sg.Execution(text, conf=conf, allow_network=allow_network) as ex:
+        got = ex.text()
+    dt = time.perf_counter() - t0
+    detail = "" if got == expected else f"\n    expected the text {expected!r}, got {got!r}"
+    return got == expected, len(got), len(expected), dt, detail
 
 
 def run_quads_case(text, conf, nq_path, allow_network, verbose, expected=None):

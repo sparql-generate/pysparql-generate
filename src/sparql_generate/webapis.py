@@ -20,15 +20,11 @@ HTTP requests are made when the network is allowed (``allow_network``, ``--no-ne
 """
 from __future__ import annotations
 
-import datetime as _dt
-import decimal as _decimal
-import os
 import time
 from typing import Dict, List, Optional, Tuple
 
 from . import ast as A
-from .terms import sql_string
-from .termtypes import ANY_T, INT_T, NULL, STR_T, CExpr, lex, string_literal_lex
+from .termtypes import ANY_T, INT_T, NULL, STR_T, CExpr, string_literal_lex
 
 TIMEOUT = 60  # seconds per request
 
@@ -177,84 +173,67 @@ def iter_http_get(ctx, args: List[CExpr], nvars: int):
     return IterPlan("table", f"(SELECT * FROM {ctx.engine.register_arrow(tbl)})", [("c0", ANY_T)], batch=1)
 
 
-def _sql_cell(v) -> Optional[dict]:
-    """A cell of a SQL result in the dynamic representation, typed as the Java engine does."""
-    X = A.XSD
-    if v is None:
-        return None
-    if isinstance(v, bool):
-        return {"k": 2, "v": "true" if v else "false", "d": X + "boolean"}
-    if isinstance(v, int):
-        return {"k": 2, "v": str(v), "d": X + "integer"}
-    if isinstance(v, float):
-        from .pyeval import java_double
-
-        # Jena's form of a double value: Double.toString, and e0 without an exponent
-        if v != v or v in (float("inf"), float("-inf")):
-            lexf = "NaN" if v != v else ("INF" if v > 0 else "-INF")
-        else:
-            lexf = java_double(v)
-            lexf = lexf if "E" in lexf else lexf + "e0"
-        return {"k": 2, "v": lexf, "d": X + "double"}
-    if isinstance(v, _decimal.Decimal):
-        from .expressions import decimal_lexical
-
-        return {"k": 2, "v": decimal_lexical(v), "d": X + "decimal"}
-    if isinstance(v, _dt.datetime):
-        return {"k": 2, "v": v.isoformat(), "d": X + "dateTime"}
-    if isinstance(v, _dt.date):
-        return {"k": 2, "v": v.isoformat(), "d": X + "date"}
-    if isinstance(v, (bytes, bytearray, memoryview)):
-        return {"k": 2, "v": bytes(v).hex().upper(), "d": X + "hexBinary"}
-    return {"k": 2, "v": str(v), "d": None}
-
-
 def iter_sql(ctx, args: List[CExpr], nvars: int):
-    from .iterators import IterPlan, IteratorError
+    """``iter:SQL(database, query, "column"...)`` as the Java engine 2.6.1 (``ITER_SQL``,
+    :mod:`sqlsources`): the database a JDBC URL, an IRI or a string; the named columns (the
+    label, exactly, else regardless of case), or all of them; each cell its natural RDF
+    literal, NULL unbound; the rows one batch.  A name that no column has or that several
+    have, or a query that the database rejects, is an error that stops the execution (as a
+    RAISE, raised where the iterator is evaluated); a database that cannot be reached gives
+    no row, with a warning, as a missing document (``fail_on_missing``: an error)."""
+    from . import sqlsources as Q
+    from .expressions import DocumentNotFound
+    from .iterators import IterPlan, IteratorError, raising_plan
+    from .terms import nt_literal
 
-    if len(args) != 2:
-        raise IteratorError("iter:SQL needs the IRI of a database and a SQL query")
-    db, query = args
-    if not (db.is_const and db.type.kind == "iri" and query.is_const and query.const is not None):
-        raise IteratorError("iter:SQL: the database IRI and the query must be constants")
-    iri, sql = str(db.const), str(query.const)
-    base_dir = ctx.engine.documents.base_dir or os.getcwd()
-    for prefix in ("jdbc:sqlite:", "jdbc:duckdb:"):
-        if iri.startswith(prefix):
-            path = iri[len(prefix):]
-            if path.startswith("//"):
-                path = path[2:]
-            path = path if os.path.isabs(path) or path == ":memory:" else os.path.join(base_dir, path)
-            break
-    else:
-        raise IteratorError(f"iter:SQL: unsupported database <{iri}> (jdbc:sqlite:<path> or jdbc:duckdb:<path>)")
+    if len(args) < 2:
+        raise IteratorError("iter:SQL needs the JDBC URL of a database and a SQL query")
+    db, sql_arg, names_args = args[0], args[1], list(args[2:])
+    if not all(a.is_const for a in args):
+        raise IteratorError("iter:SQL: the database, the query and the column names must be constants")
+    if db.is_null or sql_arg.is_null:
+        return IterPlan("table", "(SELECT NULL::VARCHAR AS c0 WHERE FALSE)", [("c0", ANY_T)])
+    if db.type.kind not in ("iri", "str") and not (db.type.kind == "typed" and db.type.dt == A.XSD_STRING):
+        raise IteratorError("iter:SQL: the database must be the JDBC URL of the database, an IRI or a string")
+    if sql_arg.type.kind not in ("str",) and not (sql_arg.type.kind == "typed" and sql_arg.type.dt == A.XSD_STRING):
+        raise IteratorError("iter:SQL: the query must be a string")
+    names = []
+    for a in names_args:
+        if a.type.kind != "str":
+            raise IteratorError(f"iter:SQL: the names of the columns must be strings, got {a.const!r}")
+        names.append(str(a.const))
+    url, sql = str(db.const), str(sql_arg.const)
+    n = len(names)
+
+    def plan_of(rows, ncols):
+        import pyarrow as pa
+
+        ncols = max(ncols, 1)
+        cols = {f"c{i}": pa.array([r[i] if i < len(r) else None for r in rows], type=ctx.engine.ANY_ARROW)
+                for i in range(ncols)}
+        return IterPlan("table", f"(SELECT * FROM {ctx.engine.register_arrow(pa.table(cols))})",
+                        [(f"c{i}", ANY_T) for i in range(ncols)])
+
+    def raising(message, values):
+        return raising_plan(ctx, [(f"c{i}", ANY_T) for i in range(max(n, nvars, 1))], message, values)
+
     try:
-        if prefix == "jdbc:sqlite:":
-            import sqlite3
-
-            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, detect_types=sqlite3.PARSE_DECLTYPES)
-        else:
-            import duckdb
-
-            con = duckdb.connect(path, read_only=True)
-        try:
-            cur = con.execute(sql)
-            names = [d[0] for d in cur.description] if cur.description else []
-            rows = cur.fetchall()
-        finally:
-            con.close()
-    except Exception as ex:  # noqa: BLE001 - a database error: no solution, as in Java
-        ctx.warnings.append(f"iter:SQL <{iri}>: {ex}")
-        rows, names = [], []
-    import pyarrow as pa
-
-    ncols = max(len(names), 1)
-    cols = {f"c{i}": pa.array([_sql_cell(r[i]) if i < len(r) else None for r in rows], type=ctx.engine.ANY_ARROW)
-            for i in range(ncols)}
-    if nvars > ncols:
-        ctx.warnings.append(f"iter:SQL: the query has {ncols} columns, {nvars} variables")
-    tbl = pa.table(cols)
-    return IterPlan("table", f"(SELECT * FROM {ctx.engine.register_arrow(tbl)})", [(f"c{i}", ANY_T) for i in range(ncols)])
+        target = Q.parse_jdbc(url, ctx.engine.documents.base_dir)
+        labels, kinds, rows = Q.query(target, sql)
+    except (ValueError, Q.SQLConnectError) as ex:
+        if ctx.engine.fail_on_missing:
+            raise DocumentNotFound(Q.redact(url))
+        ctx.warnings.append(f"iter:SQL: can not connect to the data base {Q.redact(url)}: {ex}")
+        return plan_of([], max(n, nvars))
+    except Q.SQLQueryError as ex:
+        return raising(f"SQL error: {ex}", [nt_literal(sql)])
+    try:
+        columns = Q.select_columns(labels, names)
+    except LookupError as ex:
+        return raising(ex.args[0], [nt_literal(ex.args[1]), nt_literal(sql)])
+    if nvars > len(columns):
+        ctx.warnings.append(f"iter:SQL: the query has {len(columns)} columns, {nvars} variables")
+    return plan_of(Q.natural_rows(kinds, rows, columns), len(columns))
 
 
 def register_all():

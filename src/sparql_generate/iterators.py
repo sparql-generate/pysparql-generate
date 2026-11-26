@@ -220,6 +220,153 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
     return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True)
 
 
+# -- CSVStrict (the Java engine 2.6.1) ----------------------------------------------------
+
+_WS = "".join(chr(i) for i in range(33))  # univocity trims the characters <= ' '
+_STRICT_FIELD = re.compile(
+    r'[\x00-\x09\x0b\x0c\x0e-\x20]*(?:"((?:[^"]|"")*)"[\x00-\x09\x0b\x0c\x0e-\x20]*(?=,|\r\n|\n|\r|\Z)'
+    r'|([^,\r\n]*))(,|\r\n|\n|\r|\Z)')
+
+
+def strict_csv_records(text: str):
+    """The records of a CSV text as univocity's parser reads them with the settings of the
+    Java engine's ``iter:CSVStrict``: comma, double quote, ``""`` inside quotes, the white
+    space around an unquoted value (and outside the quotes of a quoted one) removed, blank
+    lines skipped, an empty cell (quoted or not) the empty string."""
+    if '"' not in text:  # fast path: no quoted value
+        for line in re.split(r"\r\n|\n|\r", text):
+            if line.strip(_WS) == "":
+                continue
+            yield [f.strip(_WS) for f in line.split(",")]
+        return
+    pos, n, row, quoted_any = 0, len(text), [], False
+    while pos <= n:
+        m = _STRICT_FIELD.match(text, pos)
+        q, u, term = m.group(1), m.group(2), m.group(3)
+        if q is not None:
+            row.append(q.replace('""', '"').replace("\r\n", "\n"))
+            quoted_any = True
+        else:
+            row.append(u.strip(_WS))
+        pos = m.end()
+        if term == ",":
+            continue
+        if not (len(row) == 1 and row[0] == "" and not quoted_any):
+            yield row
+        row, quoted_any = [], False
+        if term == "":
+            break
+
+
+def raising_plan(ctx, cols: List[Tuple[str, TType]], message: str, values: List[Optional[str]],
+                 batch: Optional[int] = None) -> IterPlan:
+    """An iterator whose evaluation is a data error (``RaiseException`` of the Java engine):
+    a list evaluated for each input row that raises, so that, as in Java, nothing is raised
+    when no solution reaches the iterator."""
+    from .raising import raise_sql
+
+    t = ctx.engine.list_struct_type(cols)
+    return IterPlan("unnest", f"CAST(CASE WHEN {raise_sql(message, values)} IS NULL THEN NULL END AS {t})", cols,
+                    struct=True, batch=batch)
+
+
+class StrictCSVError(Exception):
+    def __init__(self, message: str, values: List[Optional[str]]):
+        super().__init__(message)
+        self.message, self.values = message, values
+
+
+def strict_csv_table(text: str, columns: List[str], doc_name: str):
+    """``(rows, positions)`` of ``iter:CSVStrict``: for each record after the header, the
+    values of the named columns (the first header cell equal to the name), then its
+    position from 0.  A column absent from the header, a document without header, a record
+    whose number of fields is not the header's: :class:`StrictCSVError`, the data error of
+    the Java engine (``doc_name`` is the N-Triples of the IRI of the document, or of the
+    string ``(inline document)``)."""
+    from .terms import nt_literal
+
+    def integer(i):
+        return nt_literal(str(i), datatype=A.XSD + "integer")
+
+    recs = strict_csv_records(text)
+    header = next(recs, None)
+    if header is None:
+        raise StrictCSVError("The CSV document has no header", [doc_name])
+    idx = []
+    for c in columns:
+        if c not in header:
+            raise StrictCSVError("The CSV document has no column", [doc_name, nt_literal(c)])
+        idx.append(header.index(c))
+    fields = len(header)
+    rows = []
+    for k, r in enumerate(recs):
+        if len(r) != fields:
+            raise StrictCSVError("A row of the CSV document does not have as many fields as the header",
+                                 [doc_name, integer(k), integer(len(r)), integer(fields)])
+        rows.append([r[j] for j in idx])
+    return rows
+
+
+@register("CSVStrict")
+def iter_csv_strict(ctx, args: List[CExpr], nvars: int) -> IterPlan:
+    """``iter:CSVStrict(doc, [batch size], "col"...)`` (the Java engine 2.6.1, for RML-IO
+    sources): the named columns of a CSV document with a header, then the position of the
+    row; an empty cell is the empty string; a row with another number of fields than the
+    header, or a column absent from it, is a data error that stops the execution, as a
+    RAISE (raised where the iterator is evaluated)."""
+    from .raising import DataError
+    from .terms import nt_literal
+
+    if not args:
+        raise IteratorError("iter:CSVStrict needs the CSV document")
+    is_iri = args[0].type.kind == "iri"
+    iri = str(args[0].const) if is_iri and args[0].is_const and args[0].const is not None else None
+    args = [resolve_doc_arg(ctx, args[0])] + list(args[1:])
+    doc, rest = args[0], list(args[1:])
+    if doc.is_null:
+        return EMPTY
+    batch = None
+    if rest and rest[0].type.kind == "int":
+        batch = _batch_size(rest[0])
+        rest = rest[1:]
+    if not _all_const(rest) or any(r.type.kind != "str" for r in rest):
+        raise IteratorError("iter:CSVStrict: expecting the names of the columns (constant strings)")
+    names = [str(r.const) for r in rest]
+    n = len(names)
+    cols = [(f"c{i}", STR_T) for i in range(n)] + [(f"c{n}", INT_T)]
+    if nvars > n + 1:
+        ctx.warnings.append(f"iter:CSVStrict: {n} columns and the position, {nvars} variables")
+    inline = nt_literal("(inline document)")
+    text = _const_text(doc)
+    if text is not None:
+        import pyarrow as pa
+
+        try:
+            rows = strict_csv_table(text, names, f"<{iri}>" if iri is not None else inline)
+        except StrictCSVError as ex:
+            return raising_plan(ctx, cols, ex.message, ex.values, batch)
+        data = {f"c{i}": pa.array([r[i] for r in rows], type=pa.string()) for i in range(n)}
+        data[f"c{n}"] = pa.array(list(range(len(rows))), type=pa.int64())
+        name = ctx.engine.register_arrow(pa.table(data))
+        return IterPlan("table", f"(SELECT * FROM {name})", cols, batch=batch, pos_column=f"c{n}")
+    engine = ctx.engine
+
+    def udf(t):
+        uri = None
+        if t is not None and t.startswith("\x00"):
+            uri, t = t[1:], engine.documents_by_uri[t[1:]].text()
+        if t is None:
+            return None
+        try:
+            rows = strict_csv_table(t, names, f"<{uri}>" if uri is not None and is_iri else inline)
+        except StrictCSVError as ex:
+            raise DataError(ex.message, ex.values)
+        return [{**{f"c{i}": r[i] for i in range(n)}, f"c{n}": k} for k, r in enumerate(rows)]
+
+    name = engine.udf("sg_csv_strict", udf, ["VARCHAR"], engine.list_struct_type(cols), key=tuple(names))
+    return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True, batch=batch)
+
+
 @register("CSVHeaders")
 def iter_csv_headers(ctx, args: List[CExpr], nvars: int) -> IterPlan:
     """The cells of the header line of a CSV document (the first record, as the Java
@@ -471,8 +618,16 @@ def _xpath_rows(text: str, path: str, aux: List[str]) -> List[list]:
     out = []
     for node in P.xpath_nodes(root, path):
         row = [P.xml_node_term(node)]
-        sub = P.xpath_sub_root(node) if not isinstance(node, (str, int, float, bool)) else None
+        element = not isinstance(node, (str, int, float, bool))
+        sub = None
         for a in aux:
+            if not a.startswith("/"):
+                # a relative sub-query (the Java engine 2.6.1): from the node in its document,
+                # so that the parent and ancestor axes reach outside it; its first node
+                row.append(_xpath_relative(node, a) if element else None)
+                continue
+            if sub is None and element:
+                sub = P.xpath_sub_root(node)
             try:
                 nodes = P.xpath_nodes(sub, a) if sub is not None else []
                 row.append(P.xml_node_term(nodes[0]) if nodes else None)
@@ -480,6 +635,18 @@ def _xpath_rows(text: str, path: str, aux: List[str]) -> List[list]:
                 row.append(None)
         out.append(row)
     return out
+
+
+def _xpath_relative(node, path: str):
+    """The first node that ``path`` selects from ``node`` in its document, as a term (None
+    when nothing is selected, or the result is not a node set, as ``XPathConstants.NODE``)."""
+    try:
+        res = node.xpath(path)
+    except Exception:  # noqa: BLE001 - not an XPath expression: unbound, as in Java
+        return None
+    if not isinstance(res, list) or not res:
+        return None
+    return P.xml_node_term(res[0])
 
 
 def _css_rows(text: str, selector: str, aux: List[str]) -> List[list]:
@@ -619,3 +786,147 @@ def iter_for(ctx, args: List[CExpr], nvars: int) -> IterPlan:
 @register("defaultGraphNamespaces")
 def iter_default_graph_namespaces(ctx, args, nvars):
     raise IteratorError("iter:defaultGraphNamespaces is not supported")
+
+
+# -- SPARQL ------------------------------------------------------------------------
+
+
+@register("SPARQL")
+def iter_sparql(ctx, args: List[CExpr], nvars: int) -> IterPlan:
+    """``iter:SPARQL(doc, query, "var"...)``: the solutions of a SPARQL 1.1 SELECT query on an
+    RDF document (Turtle, N-Triples, RDF/XML... by its media type or its extension, Turtle
+    otherwise; or a string, the document in Turtle), one row per solution: the values of the
+    variables named (by default the projected ones; unbound when a solution does not bind
+    one), then the position of the solution, from 0 (the Java engine 2.6.1, ``ITER_SPARQL``).
+    A document, query or variable name that is not one: a warning and no row."""
+    args = [resolve_doc_arg(ctx, args[0])] + list(args[1:]) if args else args
+    if len(args) < 2 or args[0].is_null or args[1].is_null:
+        if len(args) < 2:
+            raise IteratorError("iter:SPARQL needs an RDF document and a SELECT query")
+        return EMPTY
+    if not _all_const(args):
+        raise IteratorError("iter:SPARQL: the document, the query and the variable names must be constants")
+    doc, query = args[0], args[1]
+    if query.type.kind not in ("str", "typed") or not isinstance(query.const, str):
+        ctx.warnings.append("iter:SPARQL: expecting an RDF document and a SELECT query")
+        return EMPTY
+    names = []
+    for a in args[2:]:
+        if a.type.kind != "str" or a.const is None:
+            ctx.warnings.append(f"iter:SPARQL: the names of the variables must be strings, got {a.const!r}")
+            return EMPTY
+        names.append(str(a.const))
+    d = _doc_of(doc)
+    try:
+        if d is not None:
+            fmt = _rdf_format(d)
+            rows, vars_ = _sparql_rows(d.text(), fmt, d.uri, str(query.const), names)
+        else:
+            rows, vars_ = _sparql_rows(_const_text(doc) or "", "TURTLE", None, str(query.const), names)
+    except ValueError as ex:
+        ctx.warnings.append(f"iter:SPARQL: {ex}")
+        return EMPTY
+    import pyarrow as pa
+
+    n = len(vars_)
+    cols = {f"c{i}": pa.array([r[i] for r in rows], type=ctx.engine.ANY_ARROW) for i in range(n)}
+    cols[f"c{n}"] = pa.array(list(range(len(rows))), type=pa.int64())
+    out = [(f"c{i}", ANY_T) for i in range(n)] + [(f"c{n}", INT_T)]
+    return IterPlan("table", f"(SELECT * FROM {ctx.engine.register_arrow(pa.table(cols))})", out)
+
+
+def _rdf_format(d: Document) -> str:
+    """The syntax of an RDF document, by its media type, else its extension, else Turtle (as
+    ``RDFLanguages.contentTypeToLang``, then ``filenameToLang`` with Turtle by default)."""
+    from .ntriples import MEDIA_FORMATS, OXIGRAPH_FORMATS
+
+    mt = d.mediatype.split(";")[0].strip().lower() if d.mediatype else None
+    if mt in MEDIA_FORMATS:
+        return MEDIA_FORMATS[mt]
+    from urllib.parse import urlparse
+
+    ext = os.path.splitext(urlparse(d.uri).path)[1].lower() or os.path.splitext(d.path or "")[1].lower()
+    return OXIGRAPH_FORMATS.get(ext, "TURTLE")
+
+
+_RDFLIB_FORMATS = {"TURTLE": "turtle", "TRIG": "trig", "RDF_XML": "xml", "N3": "n3", "N_TRIPLES": "nt",
+                   "N_QUADS": "nquads"}
+
+
+def _sparql_rows(text: str, fmt: str, base: Optional[str], query: str, names: List[str]):
+    """``(rows, variables)``: the solutions of ``query`` on the RDF document ``text``, each a
+    list of dynamic terms ``{k, v, d}`` (None when unbound); by pyoxigraph when installed (it
+    keeps lexical forms, as Jena), else rdflib (literals not normalised)."""
+    try:
+        import pyoxigraph as ox
+    except ImportError:
+        ox = None
+    if ox is not None:
+        store = ox.Store()
+        try:
+            store.load(input=text.encode("utf-8"), format=getattr(ox.RdfFormat, fmt), base_iri=base)
+        except (SyntaxError, OSError, ValueError) as ex:
+            raise ValueError(f"not an RDF document: {ex}")
+        try:
+            res = store.query(query)
+        except (SyntaxError, ValueError, OSError) as ex:
+            raise ValueError(f"not a SPARQL query: {ex}")
+        if not isinstance(res, ox.QuerySolutions):
+            raise ValueError(f"not a SELECT query: {query}")
+        vars_ = names or [v.value for v in res.variables]
+
+        def conv(t):
+            if t is None:
+                return None
+            if isinstance(t, ox.NamedNode):
+                return {"k": 0, "v": t.value, "d": None}
+            if isinstance(t, ox.BlankNode):
+                return {"k": 1, "v": "D" + t.value, "d": None}
+            if isinstance(t, ox.Literal):
+                dt = t.datatype.value
+                return {"k": 2, "v": t.value, "d": "@" + t.language if t.language else (None if dt == A.XSD_STRING else dt)}
+            return {"k": 3, "v": str(t), "d": None}
+
+        rows = []
+        for sol in res:
+            row = []
+            for v in vars_:
+                try:
+                    row.append(conv(sol[v]))
+                except (KeyError, IndexError, TypeError):
+                    row.append(None)
+            rows.append(row)
+        return rows, vars_
+    import rdflib
+    import rdflib.term
+
+    old = rdflib.NORMALIZE_LITERALS
+    rdflib.NORMALIZE_LITERALS = False
+    try:
+        g = rdflib.Graph()
+        try:
+            g.parse(data=text, format=_RDFLIB_FORMATS.get(fmt, "turtle"), publicID=base)
+        except Exception as ex:  # noqa: BLE001
+            raise ValueError(f"not an RDF document: {ex}")
+        try:
+            res = g.query(query)
+        except Exception as ex:  # noqa: BLE001
+            raise ValueError(f"not a SPARQL query: {ex}")
+        if res.type != "SELECT":
+            raise ValueError(f"not a SELECT query: {query}")
+        vars_ = names or [str(v) for v in res.vars]
+
+        def conv_r(t):
+            if t is None:
+                return None
+            if isinstance(t, rdflib.URIRef):
+                return {"k": 0, "v": str(t), "d": None}
+            if isinstance(t, rdflib.BNode):
+                return {"k": 1, "v": "D" + str(t), "d": None}
+            dt = str(t.datatype) if t.datatype else None
+            return {"k": 2, "v": str(t), "d": "@" + t.language if t.language else (None if dt == A.XSD_STRING else dt)}
+
+        rows = [[conv_r(sol.get(rdflib.Variable(v))) for v in vars_] for sol in res.bindings]
+        return rows, vars_
+    finally:
+        rdflib.NORMALIZE_LITERALS = old

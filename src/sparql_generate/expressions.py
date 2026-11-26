@@ -775,7 +775,7 @@ def _call_function(name: str, lib, args: List[CExpr], ctx) -> CExpr:
     call is unbound (tabling); a recursive call on run-time values is refused (its
     inline expansion would not terminate), and constant recursion stops at
     ``MAX_FUNCTION_DEPTH``."""
-    sig, body = lib
+    sig, body, fbase = lib
     if len(args) != len(sig):
         return NULL  # wrong arity
     stack = ctx.compiler.function_stack
@@ -786,8 +786,9 @@ def _call_function(name: str, lib, args: List[CExpr], ctx) -> CExpr:
         raise _RuntimeRecursion(name)
     if sum(1 for k in stack if k[0] == name) >= MAX_FUNCTION_DEPTH:
         raise CompileError(f"FUNCTION <{name}>: recursion deeper than {MAX_FUNCTION_DEPTH}")
-    saved = ctx.scope
+    saved, saved_base = ctx.scope, ctx.base
     ctx.scope = {p.name: a for p, a in zip(sig, args)}
+    ctx.base = fbase  # the body against the base of the function, its arguments against the caller's
     stack.append(key or (name, None))
     try:
         return compile_expr(body, ctx)
@@ -797,7 +798,7 @@ def _call_function(name: str, lib, args: List[CExpr], ctx) -> CExpr:
         ctx.scope = saved
         return _recursive_call(name, sig, body, args, ctx)
     finally:
-        ctx.scope = saved
+        ctx.scope, ctx.base = saved, saved_base
         stack.pop()
 
 

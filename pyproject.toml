@@ -34,6 +34,8 @@ Issues = "https://github.com/sparql-generate/pysparql-generate/issues"
 [project.optional-dependencies]
 # Turtle, TriG, RDF/XML and N3 files read without rdflib (about 25 times faster)
 fast = ["pyoxigraph>=0.4"]
+# iter:SQL on PostgreSQL, MySQL and SQL Server (with Microsoft's ODBC driver for SQL Server)
+sql = ["psycopg2-binary>=2.9", "PyMySQL>=1.1", "pyodbc>=5"]
 test = ["pytest>=8", "pyoxigraph>=0.4"]
 bench = ["psutil>=5", "polars>=1"]
 

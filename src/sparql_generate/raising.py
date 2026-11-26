@@ -198,3 +198,30 @@ def _split_triple(nt: str) -> List[str]:
         terms.append(m.group(0))
         i = m.end()
     return terms
+
+
+def raise_payload(message: str, values: List[Optional[str]]) -> str:
+    """The message of the DuckDB error of a RAISE with a constant message and constant values
+    (N-Triples terms, None for UNDEF): what :func:`raise_error_of` reads back."""
+    from .terms import nt_literal
+
+    return MARKER + json.dumps({"m": nt_literal(message), "v": list(values)})
+
+
+def raise_sql(message: str, values: List[Optional[str]]) -> str:
+    """The SQL of a data error raised by an iterator or a function (``RaiseException`` of
+    the Java engine), with a constant message and values: ``sg_raise('…')``, evaluated
+    where the SQL is evaluated."""
+    from .terms import sql_string
+
+    return f"{RAISE_MACRO}({sql_string(raise_payload(message, values))})"
+
+
+class DataError(Exception):
+    """A data error raised in Python (an iterator's UDF): its message is the payload of
+    :func:`raise_payload`, so that the DuckDB error that wraps it is read back by
+    :func:`raise_error_of` as a :class:`RaiseError`."""
+
+    def __init__(self, message: str, values: List[Optional[str]]):
+        super().__init__(raise_payload(message, values))
+        self.message, self.values = message, values
