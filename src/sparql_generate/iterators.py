@@ -487,7 +487,9 @@ def iter_jsonpath(ctx, args: List[CExpr], nvars: int) -> IterPlan:
         # extraction of the auxiliary paths, the templates...) runs in parallel
         tname = engine.fresh("json")
         engine.execute(f"CREATE TEMP TABLE {tname} AS SELECT * FROM {elems}")
-        native = [i for i, a in enumerate(aux) if a.is_const and a.const is not None and P.jsonpath_is_native(str(a.const))]
+        # DuckDB extracts several paths at once only without wildcards: the definite ones
+        native = [i for i, a in enumerate(aux) if a.is_const and a.const is not None
+                  and P.jsonpath_is_native(str(a.const)) and P.jsonpath_is_definite(str(a.const))]
         multi = len(native) >= 2  # one parse of the element for all the native paths
         sel = ["c0"]
         for i, a in enumerate(aux):
@@ -535,15 +537,29 @@ def iter_jsonpath(ctx, args: List[CExpr], nvars: int) -> IterPlan:
 
 
 def _json_aux_sql(ctx, elem_sql: str, a: CExpr) -> str:
+    """An auxiliary JSONPath query on an element, as the Java engine's
+    ``context.limit(1).read(path)`` (checked with its fix-2.6.1 JAR): a definite path gives its
+    value; an indefinite one ``[]`` when nothing matches, the value of its first match when it
+    is a scalar, and nothing (unbound) when it is an object or an array."""
     if a.is_const and a.const is not None and P.jsonpath_is_native(str(a.const)):
-        return f"json_extract({elem_sql}, {a.sql})"
+        if P.jsonpath_is_definite(str(a.const)):
+            return f"json_extract({elem_sql}, {a.sql})"
+        x = f"json_extract({elem_sql}, {a.sql})"
+        return (f"CASE WHEN len({x}) = 0 THEN '[]'::JSON WHEN json_type({x}[1]) IN ('OBJECT', 'ARRAY') THEN NULL "
+                f"ELSE {x}[1] END")
     engine = ctx.engine
 
     def udf(d, p):
         if d is None or p is None:
             return None
         try:
-            return P.json_text(P.jsonpath_first(P.parse_json(d), p))
+            doc = P.parse_json(d)
+            if not P.jsonpath_is_definite(p):
+                first = P.jsonpath_all(doc, p)[:1]
+                if not first:
+                    return "[]"
+                return None if isinstance(first[0], (dict, list)) else P.json_text(first[0])
+            return P.json_text(P.jsonpath_first(doc, p))
         except Exception:
             return None
 

@@ -492,3 +492,17 @@ def test_unsafe_iri_java_cases():
     assert [s for s, _, _ in sg.generate(pre + 'GENERATE { ?s a <http://ex/C> } WHERE { BIND(fun:unsafeIRI('
                                                '"http://ex/x"^^<http://www.w3.org/2001/XMLSchema#anyURI>) AS ?s) }')] == \
         ["<http://ex/x>"]
+
+
+def test_jsonpath_auxiliary_queries_as_java():
+    """iter:JSONPath's auxiliary queries as Jayway's limit(1).read in the Java engine (checked
+    with the fix-2.6.1 JAR; the translator's key checks rely on it): a definite path gives its
+    value, an indefinite one "[]" when nothing matches, its first match when a scalar,
+    nothing when an object; several paths at once, with wildcards (DuckDB refused them)."""
+    q = ITER + ("PREFIX ex: <http://ex/> GENERATE { ex:s ex:a ?a ; ex:b ?b ; ex:c ?c ; ex:d ?d ; ex:e ?e ; ex:f ?f . } "
+                "ITERATOR iter:JSONPath('\\{\"s\":[\\{\"N\":\"V\"},\\{\"N\":\"W\"}],\"t\":[],\"o\":\\{\"x\":1},\"n\":null}', "
+                "\"$\", \"$.s[*].N\", \"$.t[*].N\", \"$.o\", \"$.n\", \"$.s[*]\", \"$.s[?(@.N == 'W')].N\") "
+                "AS ?doc ?a ?b ?c ?d ?e ?f")
+    got = sorted((p, o) for _, p, o in sg.generate(q))
+    assert got == [("<http://ex/a>", '"V"'), ("<http://ex/b>", '"[]"'), ("<http://ex/c>", '"{\\"x\\":1}"'),
+                   ("<http://ex/f>", '"W"')]
