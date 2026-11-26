@@ -18,3 +18,7 @@ isomorphism).
   (release JAR, 2026-11-26, JDK 21), with `-fo NT`, or `-fo NQUADS` for the quads.
   `tests/triple-terms` (outside this directory: rdflib reads no RDF 1.2 triple term) is
   compared line by line with the 2.5.0 output by `tests/test_triple_terms.py`.
+
+Every case of this directory was run again on 2026-11-26 with the Java engine 2.5.0 (release
+JAR): its output is the expected one (graph or dataset isomorphism), the `quads-*` cases
+included.
