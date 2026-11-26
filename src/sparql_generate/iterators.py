@@ -641,7 +641,10 @@ def _xpath_relative(node, path: str):
     """The first node that ``path`` selects from ``node`` in its document, as a term (None
     when nothing is selected, or the result is not a node set, as ``XPathConstants.NODE``)."""
     try:
-        res = node.xpath(path)
+        try:
+            res = node.xpath(path, namespaces=P.namespaces(node))
+        except Exception:  # noqa: BLE001 - a prefix declared below the root
+            res = node.xpath(path, namespaces=P.namespaces(node, everywhere=True))
     except Exception:  # noqa: BLE001 - not an XPath expression: unbound, as in Java
         return None
     if not isinstance(res, list) or not res:

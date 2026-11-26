@@ -213,13 +213,31 @@ def xpath_nodes(root, path: str) -> List[Any]:
     if path.strip() == "/":
         # the document node: Jena serialises the whole document
         return [root]
+    ns = namespaces(root)
     try:
-        res = tree.xpath(path)
+        res = tree.xpath(path, namespaces=ns)
     except etree.XPathEvalError:
-        res = etree.ElementTree(root).xpath(path)
+        res = etree.ElementTree(root).xpath(path, namespaces=namespaces(root, everywhere=True))
     if isinstance(res, list):
         return res
     return [res]
+
+
+def namespaces(node, everywhere: bool = False) -> dict:
+    """The prefixes that an XPath expression may use on the document of ``node``: those
+    declared on its root element (as the Java engine's namespace context, RMLSTC0007d), or,
+    ``everywhere``, by any element of the document; the default namespace is stripped."""
+    try:
+        root = node.getroottree().getroot()
+    except AttributeError:
+        return {}
+    ns = {k: v for k, v in (root.nsmap or {}).items() if k}
+    if everywhere:
+        for el in root.iter():
+            for k, v in (getattr(el, "nsmap", None) or {}).items():
+                if k and k not in ns:
+                    ns[k] = v
+    return ns
 
 
 def xpath_sub_root(element):

@@ -461,3 +461,17 @@ def test_unsafe_iri():
                    ("<http://ex/s>", "<http://ex/k>", "<http://x/a\\u0020b>"),
                    ("<http://ex/s>", "<http://ex/ok>", "<http://ex/ok>"),
                    ("<http://ex/s>", "<http://ex/str>", '"http://ex/a b"')]
+
+
+def test_xpath_prefixes_of_the_document():
+    """The prefixes declared by the document may be used in the XPath expressions (RMLSTC0007d
+    of RML-IO, the Java engine's namespace context); the sub-queries of the matched node too."""
+    xml = ("<Friends xmlns:ex='http://example.org'><ex:Character id='0'><ex:name>Monica</ex:name></ex:Character>"
+           "<ex:Character id='1'><ex:name>Rachel</ex:name></ex:Character></Friends>")
+    assert_generates(XP + 'ex:c0 ex:name "Monica" . ex:c1 ex:name "Rachel" .',
+                     XP + f'GENERATE {{ ?s ex:name ?name }} ITERATOR ite:XPath("{xml}", "//Friends/ex:Character", '
+                     '"@id", "ex:name/text()") AS ?c ?id ?name WHERE { BIND(IRI(CONCAT("http://ex/c", ?id)) AS ?s) }')
+    assert_generates(XP + 'ex:c0 ex:name "Monica" . ex:c1 ex:name "Rachel" .',
+                     XP + f'GENERATE {{ GENERATE {{ ?s ex:name ?name }} ITERATOR ite:XPath(?c, "/*/ex:name/text()") AS ?name '
+                     f'ITERATOR ite:XPath(?c, "/*/@id") AS ?id WHERE {{ BIND(IRI(CONCAT("http://ex/c", ?id)) AS ?s) }} . }} '
+                     f'ITERATOR ite:XPath("{xml}", "//Friends/ex:Character") AS ?c')
