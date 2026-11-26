@@ -1,0 +1,60 @@
+cff-version: 1.2.0
+message: "If you use pysparql-generate, please cite it as below; the language SPARQL-Generate is described in the ESWC 2017 paper of the references."
+title: "pysparql-generate"
+abstract: "An implementation of SPARQL-Generate with a Python API, compiled to a columnar engine (DuckDB): generate RDF or text from CSV, JSON, XML, HTML and RDF."
+type: software
+license: Apache-2.0
+version: "0.3.0"
+date-released: "2026-11-26"
+doi: "10.5281/zenodo.24441877"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24441877"
+    description: "All versions (concept DOI)"
+repository-code: "https://github.com/sparql-generate/pysparql-generate"
+url: "https://pypi.org/project/pysparql-generate/"
+authors:
+  - family-names: "Lefrançois"
+    given-names: "Maxime"
+    affiliation: "Mines Saint-Étienne"
+keywords:
+  - SPARQL
+  - SPARQL-Generate
+  - RDF
+  - knowledge graph construction
+  - RML
+  - DuckDB
+references:
+  - type: software
+    title: "SPARQL-Generate"
+    doi: "10.5281/zenodo.4041198"
+    repository-code: "https://github.com/sparql-generate/sparql-generate"
+    authors:
+      - family-names: "Lefrançois"
+        given-names: "Maxime"
+      - family-names: "Zimmermann"
+        given-names: "Antoine"
+      - family-names: "Bakerally"
+        given-names: "Noorani"
+  - type: conference-paper
+    title: "A SPARQL Extension for Generating RDF from Heterogeneous Formats"
+    authors:
+      - family-names: "Lefrançois"
+        given-names: "Maxime"
+      - family-names: "Zimmermann"
+        given-names: "Antoine"
+      - family-names: "Bakerally"
+        given-names: "Noorani"
+    collection-title: "The Semantic Web. ESWC 2017"
+    collection-type: proceedings
+    conference:
+      name: "Extended Semantic Web Conference (ESWC 2017)"
+      city: "Portorož"
+      country: "SI"
+    publisher:
+      name: "Springer"
+    volume: 10249
+    start: 35
+    end: 50
+    year: 2017
+    doi: "10.1007/978-3-319-58068-5_3"

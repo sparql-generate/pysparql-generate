@@ -1,0 +1,13 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# The column check of the queries that rml-to-sparql-generate 0.3.0 writes: a sub-query
+# with an empty template reads the header of the CSV file only, and raises an error for a
+# column that it does not have.
+GENERATE {
+  GENERATE { } ITERATOR iter:CSVHeaders(<people.csv>) AS ?column_ WHERE { } GROUP BY ?nogroup_ HAVING (true
+    && (SUM(IF(STR(?column_) = "name", 1, 0)) > 0 || RAISE("RML data error: no such column in the header of the source", "name", <people.csv>))
+    && (SUM(IF(STR(?column_) = "mail", 1, 0)) > 0 || RAISE("RML data error: no such column in the header of the source", "mail", <people.csv>))) .
+  GENERATE { <person/{?name}> ex:email ?email . } ITERATOR iter:CSV(<people.csv>, "name", "email") AS ?name ?email .
+}

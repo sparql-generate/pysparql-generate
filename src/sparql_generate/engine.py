@@ -11,6 +11,7 @@ import duckdb
 from . import ast as A
 from .documents import Document, DocumentSet
 from .expressions import EXTRA_SUPPORT_SQL
+from .raising import raise_error_of
 from .terms import sql_string
 from .termtypes import ANY_SQL_TYPE, SUPPORT_SQL, TType
 
@@ -80,7 +81,13 @@ class Engine:
     def execute(self, sql: str):
         if self.debug:
             self.sql_log.append(sql)
-        return self.con.execute(sql)
+        try:
+            return self.con.execute(sql)
+        except duckdb.Error as ex:
+            raised = raise_error_of(ex)
+            if raised is not None:
+                raise raised from None
+            raise
 
     def relation(self, sql: str):
         """A DuckDB relation of a query, for Arrow output without the extra copy that a

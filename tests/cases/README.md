@@ -19,6 +19,12 @@ isomorphism).
   `tests/triple-terms` (outside this directory: rdflib reads no RDF 1.2 triple term) is
   compared line by line with the 2.5.0 output by `tests/test_triple_terms.py`.
 
+- `raise-*`, `csv-headers-iri`, `group-by-empty-input`, `iri-empty-segments`: expected outputs
+  produced by the Java engine 2.6.0 (release JAR, 2026-11-26, JDK 21), with `-fo NT`; for a
+  query whose execution stops with the error of a `RAISE` expression, `expected_error.txt`
+  holds the message that the Java command line writes on the standard error.
+
 Every case of this directory was run again on 2026-11-26 with the Java engine 2.5.0 (release
 JAR): its output is the expected one (graph or dataset isomorphism), the `quads-*` cases
-included.
+included; the cases above, which need 2.6.0 (`RAISE`, `iter:CSVHeaders` on an IRI), with the
+Java engine 2.6.0.

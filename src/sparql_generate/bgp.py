@@ -933,7 +933,9 @@ class PatternCompiler:
         finally:
             self.ctx.scope, self.ctx.exists_hook = saved, saved_hook
         src = self.compiler.ensure_uid(self.ctx, Rel(g.sql if g.sql is not None else self.one())).sql
-        return Piece(f"(SELECT * FROM {src} WHERE {' AND '.join(conds)})", g.scope, g.nonnull)
+        from .expressions import conjunction
+
+        return Piece(f"(SELECT * FROM {src} WHERE {conjunction(conds)})", g.scope, g.nonnull)
 
 
 def _ebv(e: CExpr) -> str:

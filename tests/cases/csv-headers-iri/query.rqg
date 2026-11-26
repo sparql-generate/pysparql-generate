@@ -1,0 +1,9 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# iter:CSVHeaders on the IRI of a CSV document: the cells of its header line (a quoted cell
+# with a line break, an empty cell), the rest of the document not read.
+GENERATE {
+  ex:headers ex:header ?h .
+} ITERATOR iter:CSVHeaders(<header.csv>) AS ?h

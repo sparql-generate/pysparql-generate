@@ -2,7 +2,8 @@
 """Run the Java test cases (``sparql-generate-jena/src/test/resources/generate/*``)
 and compare the generated graph with ``expected_output.ttl`` by RDF graph
 isomorphism (or the generated dataset with ``expected_output.nq`` or
-``expected_output.trig`` by RDF dataset isomorphism, for a query with GRAPH blocks).
+``expected_output.trig`` by RDF dataset isomorphism, for a query with GRAPH blocks; or the
+message of the error that a RAISE expression raises with ``expected_error.txt``).
 
     python scripts/conformance.py [--tests DIR] [--only NAME ...] [--no-network] [-v]
 """
@@ -30,6 +31,9 @@ def run_case(d: str, allow_network: bool, verbose: bool):
     qfile = os.path.join(d, conf.get("query", "query.rqg"))
     with open(qfile, encoding="utf-8") as f:
         text = f.read()
+    err_path = os.path.join(d, "expected_error.txt")
+    if os.path.exists(err_path):  # a query that RAISEs an error: its message
+        return run_error_case(text, conf, err_path, allow_network)
     nq_path = os.path.join(d, "expected_output.nq")
     if os.path.exists(nq_path):  # a dataset (GRAPH blocks): compared by dataset isomorphism
         return run_quads_case(text, conf, nq_path, allow_network, verbose)
@@ -57,6 +61,24 @@ def run_case(d: str, allow_network: bool, verbose: bool):
     if warnings and verbose:
         detail += "".join(f"\n    warning: {w}" for w in warnings)
     return ok, len(got), len(exp), dt, detail
+
+
+def run_error_case(text, conf, err_path, allow_network):
+    """A case whose execution stops with the error of a RAISE expression: the message and
+    values of the error are the content of ``expected_error.txt``."""
+    with open(err_path, encoding="utf-8") as f:
+        expected = f.read().strip()
+    t0 = time.perf_counter()
+    try:
+        with sg.Execution(text, conf=conf, allow_network=allow_network) as ex:
+            ex.to_dataset()
+    except sg.RaiseError as e:
+        got = str(e)
+    else:
+        got = None
+    dt = time.perf_counter() - t0
+    detail = "" if got == expected else f"\n    expected the error {expected!r}, got {got!r}"
+    return got == expected, 0, 0, dt, detail
 
 
 def run_quads_case(text, conf, nq_path, allow_network, verbose, expected=None):

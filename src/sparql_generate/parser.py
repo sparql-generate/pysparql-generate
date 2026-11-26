@@ -1072,6 +1072,13 @@ class Parser:
         if name in ("CONCAT", "COALESCE"):
             self.advance()
             return A.Call(name, tuple(self.parse_expression_list()))
+        if name == "RAISE":
+            # RAISE(message, value...): an expression that stops the execution (SPARQL-Generate 2.6)
+            self.advance()
+            args = self.parse_expression_list()
+            if not args:
+                raise self.error("RAISE needs a message: RAISE(message, value...)", tok)
+            return A.Call("RAISE", tuple(args))
         if name in ("SUBSTR", "REGEX", "REPLACE", "IF"):
             self.advance()
             self.expect("(")

@@ -1,0 +1,25 @@
+BASE <http://example.com/base/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# Named graphs written to files with --targets targets.json (the Java command line 2.6.0):
+# formats and compressions by extension, a format and an encoding by the description of the
+# targets, graphs inside a file (#g=), graphs computed from the data, and graphs that stay
+# in the output.
+GENERATE {
+  ex:s ex:default ?i .
+  GRAPH ex:kept { ex:s ex:kept ?i }
+  GRAPH <out/people.nq.gz> { <person/{?i}> ex:name "name {?i}" }
+  GRAPH <dump.trig> { ex:s ex:p ?i }
+  GRAPH <dump.trig#g=http://example.com/g1> { ex:s ex:q ?i }
+  GRAPH <dump.nq#g={STR(?g)}> { ex:s ex:r ?i }
+  GRAPH <part/{?i}.ttl> { ex:s ex:part ?i ; ex:label "é"@fr }
+  GRAPH <f.jsonld> { ex:s ex:json ?i }
+  GRAPH <f.rj> { ex:s ex:rj ?i, "x" }
+  GRAPH <f.rdf.bz2> { ex:s ex:xml ?i }
+  GRAPH <f.n3.zip> { ex:s ex:n3 ?i }
+  GRAPH <utf16.nq> { ex:s ex:utf16 "é {?i}" }
+  GRAPH <noext> { ex:s ex:noext ?i }
+  GRAPH <archive.nt.tar.xz> { ex:s ex:tar ?i }
+} ITERATOR iter:for(1, 1, 4) AS ?i
+  BIND(IRI(CONCAT("http://example.com/graph/", STR(?i))) AS ?g)

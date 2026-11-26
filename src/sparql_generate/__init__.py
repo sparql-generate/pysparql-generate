@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import json
 import os
+
+import duckdb
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from . import ast
@@ -33,13 +35,15 @@ from .engine import Engine
 from .expressions import CompileError, DocumentNotFound
 from .lexer import ParseError
 from .parser import parse
+from .raising import RaiseError, raise_error_of
+from .targets import TargetError
 
 __all__ = [
     "parse", "generate", "generate_quads", "generate_to", "to_graph", "to_dataset", "template", "select", "perform",
-    "Execution", "load_conf", "QuadsNotSupported", "QUAD_FORMATS",
-    "ParseError", "CompileError", "DocumentNotFound", "Engine", "DocumentSet", "__version__",
+    "Execution", "load_conf", "QuadsNotSupported", "QUAD_FORMATS", "TargetError",
+    "ParseError", "CompileError", "DocumentNotFound", "RaiseError", "Engine", "DocumentSet", "__version__",
 ]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 Documents = Union[DocumentSet, Dict[str, object], List[dict], None]
 
@@ -125,6 +129,9 @@ class Execution:
         self.engine.debug = debug
         self.engine.stream_messages, self.engine.stream_seconds = stream_messages, stream_seconds
         self.compiler = Compiler(self.engine)
+        self.base_dir = base_dir
+        # the quads of the named graphs left in the output by graphs_to_files(), or None
+        self._named_sql: Optional[str] = None
         self.plan: Plan = self.compiler.compile(self.query, bindings)
 
     @property
@@ -143,7 +150,8 @@ class Execution:
 
     def _default_graph_only(self) -> None:
         """A triple output of a query with quads: the default graph, with a warning."""
-        if self.has_quads and DEFAULT_GRAPH_ONLY not in self.plan.warnings:
+        if self.has_quads and DEFAULT_GRAPH_ONLY not in self.plan.warnings and (
+                self._named_sql is None or self.generates_named_graphs()):
             import warnings
 
             self.plan.warnings.append(DEFAULT_GRAPH_ONLY)
@@ -161,14 +169,14 @@ class Execution:
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
-        return self.engine.relation(self.plan.triples_sql(distinct)).to_arrow_reader(batch_size)
+        return _reader(self.engine.relation(self._triples_sql(distinct)), batch_size)
 
     def arrow(self, distinct: bool = False):
         """The generated triples of the default graph as a ``pyarrow.Table`` with columns s, p, o."""
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
-        return self.engine.relation(self.plan.triples_sql(distinct)).to_arrow_table()
+        return _raising(lambda: self.engine.relation(self._triples_sql(distinct)).to_arrow_table())
 
     def quads(self, distinct: bool = False, batch_size: int = 65536) -> Iterator[Tuple[str, str, str, Optional[str]]]:
         """Iterate over the generated quads ``(s, p, o, g)`` as N-Triples term strings: the
@@ -181,7 +189,84 @@ class Execution:
         """The generated quads as a stream of ``pyarrow.RecordBatch`` (columns s, p, o, g)."""
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
-        return self.engine.relation(self.plan.quads_sql(distinct)).to_arrow_reader(batch_size)
+        return _reader(self.engine.relation(self._quads_sql(distinct)), batch_size)
+
+    def _triples_sql(self, distinct: bool = False) -> str:
+        """The triples of the default graph of the output."""
+        if self._named_sql is None:
+            return self.plan.triples_sql(distinct)
+        parts = [f"SELECT * FROM ({q})" for q in self.plan.triple_selects]
+        parts.append(f"SELECT s, p, o FROM {self._named_sql} WHERE g IS NULL")
+        body = "\nUNION ALL\n".join(parts)
+        return f"SELECT DISTINCT s, p, o FROM ({body})" if distinct else body
+
+    def _quads_sql(self, distinct: bool = False) -> str:
+        """The quads of the output: the default graph (``g`` NULL) and the named graphs."""
+        if self._named_sql is None:
+            return self.plan.quads_sql(distinct)
+        parts = [f"SELECT s, p, o, NULL::VARCHAR AS g FROM ({q})" for q in self.plan.triple_selects]
+        parts.append(f"SELECT s, p, o, g FROM {self._named_sql}")
+        body = "\nUNION ALL\n".join(parts)
+        return f"SELECT DISTINCT s, p, o, g FROM ({body})" if distinct else body
+
+    def generates_named_graphs(self) -> bool:
+        """The output holds quads in named graphs (those that :meth:`graphs_to_files` wrote
+        to files excepted)."""
+        if self.plan.kind != "GENERATE" or not self.plan.quad_selects:
+            return False
+        sql = f"SELECT count(*) FROM (SELECT g FROM ({self._quads_sql()}) WHERE g IS NOT NULL LIMIT 1)"
+        return _raising(lambda: self.engine.execute(sql).fetchall()[0][0]) > 0
+
+    def graphs_to_files(self, targets: Union[None, str, Dict[str, dict]] = None,
+                        output_dir: Optional[str] = None) -> Dict[str, int]:
+        """Write the named graphs that name RDF files to these files, as the Java command line
+        does with ``--graphs-to-files``: a named graph whose IRI is a relative path to an RDF
+        file, resolved against the base (``GRAPH <out/people.ttl> { ... }``), is written to
+        that file, in the folder of a ``file:`` base IRI, else in ``output_dir`` (default: the
+        ``base_dir`` of the execution, else the current directory).  Format and compression
+        come from the extension (``.nq``, ``.nt``, ``.ttl``, ``.trig``, ``.n3``, ``.jsonld``,
+        ``.rdf``, ``.rj``; ``.gz``, ``.zip``, ``.bz2``, ``.xz``, ``.tar.gz``, ``.tar.xz``,
+        ``.tar.bz2``), or from ``targets``, the description of the targets (a dict, or the path
+        of its JSON file: ``{"dump1.nq": {"format": "N-Quads", "compression": "gzip",
+        "encoding": "UTF-16"}}``).  ``GRAPH <dump.nq#g=IRI>`` names the graph ``IRI`` in
+        ``dump.nq``.  Afterwards, the outputs of this execution hold the other graphs only.
+        Returns the number of quads written to each file, by path.  A graph name that cannot
+        be written (a path that leaves the folder...) raises :class:`targets.TargetError`."""
+        from .compiler import DEFAULT_GRAPH_NAMES_SQL
+        from .targets import GraphTargets, read_descriptions, write_target
+
+        if self.plan.kind != "GENERATE" or not self.plan.quad_selects or self._named_sql is not None:
+            return {}
+        descriptions = read_descriptions(targets) if isinstance(targets, (str, os.PathLike)) else targets
+        folder = output_dir or self.base_dir or os.getcwd()
+        resolver = GraphTargets(self.query.base or self.engine.base, folder, descriptions)
+        named = "\nUNION ALL\n".join(
+            f"SELECT s, p, o, CASE WHEN g IN ({DEFAULT_GRAPH_NAMES_SQL}) THEN NULL ELSE g END AS g FROM ({q})"
+            for q in self.plan.quad_selects)
+        table = self.engine.fresh("__named")
+        self.engine.execute(f"CREATE TEMP TABLE {table} AS {named}")
+        graphs = [r[0] for r in self.engine.execute(f"SELECT DISTINCT g FROM {table} WHERE g IS NOT NULL").fetchall()]
+        routes = {}
+        for g in sorted(graphs):
+            r = resolver.resolve(g)
+            if r is not None:
+                routes[g] = r
+        self._named_sql = table
+        if not routes:
+            return {}
+        files = list(dict.fromkeys(f for f, _ in routes.values()))
+        import pyarrow as pa
+
+        mapping = pa.table({"g": list(routes), "f": [files.index(f) for f, _ in routes.values()],
+                            "ig": [None if ig is None else f"<{ig}>" for _, ig in routes.values()]})
+        mtable = self.engine.register_arrow(mapping)
+        written = {}
+        for k, f in enumerate(files):
+            sql = (f"SELECT DISTINCT q.s, q.p, q.o, m.ig AS g FROM {table} AS q JOIN {mtable} AS m ON q.g = m.g "
+                   f"WHERE m.f = {k}")
+            written[f.path] = write_target(f, _reader(self.engine.relation(sql), 65536), self.query.prefixes)
+        self._named_sql = f"(SELECT * FROM {table} WHERE g IS NULL OR g NOT IN (SELECT g FROM {mtable}))"
+        return written
 
     def to_dataset(self):
         """The generated quads as an ``rdflib.Dataset`` (default graph and named graphs)."""
@@ -216,7 +301,7 @@ class Execution:
                 path = os.fspath(out)
                 from .terms import sql_string
 
-                sql = (f"COPY (SELECT s || ' ' || p || ' ' || o || ' .' AS t FROM ({self.plan.triples_sql(distinct)})) "
+                sql = (f"COPY (SELECT s || ' ' || p || ' ' || o || ' .' AS t FROM ({self._triples_sql(distinct)})) "
                        f"TO {sql_string(path)} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
                 return self.engine.execute(sql).fetchall()[0][0]
             n = 0
@@ -237,7 +322,7 @@ class Execution:
             if isinstance(out, (str, os.PathLike)):
                 from .terms import sql_string
 
-                sql = (f"COPY (SELECT {line} AS t FROM ({self.plan.quads_sql(distinct)})) "
+                sql = (f"COPY (SELECT {line} AS t FROM ({self._quads_sql(distinct)})) "
                        f"TO {sql_string(os.fspath(out))} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
                 return self.engine.execute(sql).fetchall()[0][0]
             n = 0
@@ -375,6 +460,41 @@ def select(query: Union[str, ast.Query], **kwargs) -> List[Dict[str, Optional[st
 
 
 # -- helpers ---------------------------------------------------------------------------
+
+
+def _raising(fn):
+    """``fn()``, a DuckDB error that RAISE raised turned into a :class:`RaiseError`."""
+    try:
+        return fn()
+    except duckdb.Error as ex:
+        raised = raise_error_of(ex)
+        if raised is not None:
+            raise raised from None
+        raise
+
+
+def _reader(relation, batch_size: int):
+    """The record batches of a relation, computed as they are read; an error that RAISE
+    raised while they are computed is a :class:`RaiseError`."""
+    import pyarrow as pa
+
+    reader = _raising(lambda: relation.to_arrow_reader(batch_size))
+
+    def batches():
+        it = iter(reader)
+        while True:
+            try:
+                b = next(it)
+            except StopIteration:
+                return
+            except duckdb.Error as ex:
+                raised = raise_error_of(ex)
+                if raised is not None:
+                    raise raised from None
+                raise
+            yield b
+
+    return pa.RecordBatchReader.from_batches(reader.schema, batches())
 
 
 def _rdflib_format(fmt: str) -> str:

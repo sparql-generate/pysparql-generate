@@ -1,0 +1,3 @@
+<http://example.com/s> <http://example.com/r> "1"^^<http://www.w3.org/2001/XMLSchema#integer> <http://example.com/graph/1> .
+<http://example.com/s> <http://example.com/r> "2"^^<http://www.w3.org/2001/XMLSchema#integer> <http://example.com/graph/2> .
+<http://example.com/s> <http://example.com/r> "3"^^<http://www.w3.org/2001/XMLSchema#integer> <http://example.com/graph/3> .

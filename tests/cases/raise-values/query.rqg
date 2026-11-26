@@ -1,0 +1,14 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# The values of RAISE, as the Java engine writes them: numbers and booleans abbreviated,
+# the prefixes of Jena (xsd:, rdf:...), UNDEF for a value that cannot be evaluated.
+# (Not here: a constant double, whose lexical form the Java engine keeps as written, and a
+# constant literal of an unknown datatype, "x"^^ex:dt, whose datatype the Java engine 2.6.0
+# drops.)
+GENERATE { ex:s ex:p ?x . }
+WHERE {
+  BIND(RAISE("values", "a\"b", "chat"@fr, 3, 2.50, true, "2026-11-26"^^xsd:date, xsd:string,
+             <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>, ex:a, STRDT("x", ex:dt), ?unbound, 1/0, STRLEN("abc")) AS ?x)
+}

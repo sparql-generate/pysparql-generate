@@ -1,0 +1,8 @@
+PREFIX ex:   <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+ex:s    ex:p    3 , 2 , 1 .
+
+ex:g1 {
+    ex:s    ex:q    3 , 2 , 1 .
+}

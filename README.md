@@ -59,8 +59,15 @@ ex.arrow()              # pyarrow.Table with columns s, p, o
 ex.batches()            # stream of pyarrow.RecordBatch (s, p, o), computed as it is read
 ex.actions()            # PERFORM: iterator of (action IRI, [t1, ..., tk]), in order
 ex.write(path_or_file, format="nt", distinct=False)
+ex.graphs_to_files(targets=None, output_dir="dir")  # named graphs that name RDF files written to them
 ex.warnings             # e.g. documents not found
 ex.close()
+
+try:
+    sg.generate_to(query, "out.nt", documents=docs)
+except sg.RaiseError as e:    # RAISE(message, value...) evaluated by the query
+    print(e.message, e.values)  # "No email address for", ['"Bob"', '"1"^^<http://www.w3.org/2001/XMLSchema#integer>']
+    print(e)                    # No email address for: "Bob", 1
 ```
 
 Keyword arguments (all optional): `base`, `documents`, `base_dir` (relative
@@ -74,6 +81,21 @@ else by rdflib), `bindings` (`[{var: ast term}]`), `conf` (a parsed
 documents not in the document set are fetched), `threads`, `memory_limit`,
 `distinct` (deduplicate triples; off by default, outputs may contain duplicates).
 
+`RAISE(message, value...)` (SPARQL-Generate 2.6) stops the execution with a
+`sg.RaiseError`: `message` is the lexical form of its first argument, `values` the other
+arguments as N-Triples terms (None for an unbound variable or an error), and `str(e)` the
+message followed by the values as the Java engine writes them. It is raised when the query
+is compiled or when its output is read, before anything is written to the output.
+
+`ex.graphs_to_files(targets=None, output_dir=None)` writes the named graphs whose IRI is a
+relative path to an RDF file, resolved against the base (`GRAPH <out/people.ttl> { ... }`),
+to that file, and leaves the other graphs in the outputs of the execution, as the Java
+command line does with `--graphs-to-files` (see below). `targets` is the description of the
+targets, a dict or the path of its JSON file; `output_dir` the folder of the files when the
+base IRI is not a `file:` IRI (default: `base_dir`, else the current directory). It returns
+the number of quads written to each file; a graph name that cannot be written raises
+`sg.TargetError` with the message of the Java engine.
+
 ## Command line
 
 Option-compatible with the Java CLI where it makes sense:
@@ -84,6 +106,8 @@ sparql-generate-py -q query.rqg --document http://ex.org/d.csv=data.csv -o out.n
 sparql-generate-py -q query.rqg --no-network --threads 8 --memory-limit 4GB --time
 sparql-generate-py -q query.rqg --explain          # print the compiled SQL plan
 sparql-generate-py -q query.rqg -x                 # syntax check only
+sparql-generate-py -d DIR -b http://example.org/ --graphs-to-files -fo NQUADS
+sparql-generate-py -d DIR -b http://example.org/ --targets targets.json -fo NQUADS
 ```
 
 `-d DIR` reads `DIR/sparql-generate-conf.json` (`query`, `base`, `documentset`,
@@ -97,7 +121,44 @@ the variable of a `SOURCE` clause stays unbound, the graph of a `FROM` clause is
 With `--fail-on-missing` (key `failOnMissing`; `fail_on_missing=True` in the API, which
 raises `sg.DocumentNotFound`), a document, a graph or a named query that cannot be found
 stops the execution with status 1 and the message `Document not found: <iri>`, as in the
-Java engine 2.2.3.
+Java engine 2.2.3. A `RAISE` expression that is evaluated stops the execution with status 1,
+its message and values on the standard error (`error: No email address for: "Bob", 1`).
+
+With `--graphs-to-files` (key `graphsToFiles`), a `GENERATE` query writes the named graphs
+whose IRI is a relative path to an RDF file, resolved against the base IRI, to that file,
+as the Java command line 2.6.0 does: `GRAPH <people.ttl> { ... }` writes `people.ttl`, and a
+graph computed from the data, `GRAPH <out/{?country}.nq> { ... }`, one file per country. The
+other named graphs, and the default graph, stay in the output.
+
+- **Folder.** The files are written in the folder of the base IRI if it is a `file:` IRI, and
+  else in the working directory (`-d`). Without base, the relative IRIs of the query are
+  resolved against the current directory, and the files are written there.
+- **Format and compression** come from the extension: `.nq`, `.nt`, `.ttl`, `.trig`, `.n3`,
+  `.jsonld`, `.rdf` or `.rdfxml`, `.rj` or `.rdfjson`; then, optionally, `.gz`, `.zip`,
+  `.bz2`, `.xz`, `.tar.gz`, `.tar.xz` or `.tar.bz2`. An archive holds one entry, named after
+  the file without its compression extension.
+- **Named graphs inside a file.** `GRAPH <dump.nq#g=http://example.org/people> { ... }`
+  writes the graph `http://example.org/people` in `dump.nq` (`.nq`, `.trig` or `.jsonld`);
+  `GRAPH <dump.nq> { ... }` writes its default graph. The IRI after `g=` can be
+  percent-encoded: `GRAPH <dump.nq#g={STR(?g)}> { ... }`.
+- **Safety.** A path that would leave the folder (`..` or `.` segments, an empty segment, a
+  backslash, encoded or not) is an error, status 1. A graph name that resolves outside of the
+  folder of the base stays a named graph of the output.
+- Each triple is written once in a file, and a file is created only if a triple goes to it.
+- A main output format that holds triples only, such as `-fo NT`, is refused only if a named
+  graph reaches the output.
+
+`--targets targets.json` (key `targets`, relative to the working directory) describes the
+target files, for a format, a compression or a character encoding that the extension does not
+give; it implies `--graphs-to-files`. Its keys are paths relative to the folder; each value
+has the optional keys `format` (`N-Quads`, `Turtle`, `JSON-LD`, a media type such as
+`application/n-triples`, or an extension), `compression` (`none`, `gzip`, `zip`, `bzip2`,
+`xz`, `tar.gz`, `tar.xz`, `tar.bz2`) and `encoding` (`UTF-8` by default; `UTF-16` writes a
+byte order mark, big-endian):
+
+```json
+{ "dump1.nq": { "encoding": "UTF-16" }, "out/people": { "format": "Turtle", "compression": "gzip" } }
+```
 
 ## How it works
 
@@ -138,6 +199,13 @@ the numeric type promotion of XPath, exact decimals and Jena's lexical forms
 (`afn:triple(s, p, o)`, `afn:isTriple`, `afn:subject`, `afn:predicate`, `afn:object` of
 Jena's function library), written `<<( s p o )>>` in N-Triples and N-Quads and matched by
 the `WHERE` clause of a query that reads them from a `FROM GENERATE`.
+`RAISE(message, value...)`, evaluated only when its value is needed, as in the Java
+engine: in `IF(c, a, RAISE(...))` when `c` is false, in `COALESCE(e, RAISE(...))` when `e`
+is unbound or an error, in `a || RAISE(...)` when `a` is not true, in `a && RAISE(...)` when
+`a` is not false, in `x IN (a, RAISE(...))` when `x` is not `a`, and in a list of `FILTER`s
+when the filters before it are true; a `BIND` with `RAISE` is evaluated for each solution,
+also when nothing reads its variable; `BIND`, `FILTER`, `COALESCE` and the iterators do not
+catch its error. `iter:CSVHeaders` on the IRI of a CSV document reads its header line only.
 `iter:CSV` with named columns binds the position of the row (from 0, across batches) after
 the last column, and matches the names with the header ignoring case, as the Java engine
 2.5.0 does. Local documents are read decompressed according to the extension of their name

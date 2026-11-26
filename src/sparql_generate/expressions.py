@@ -15,6 +15,7 @@ import re
 from typing import List
 
 from . import ast as A
+from .raising import MARKER, RAISE_MACRO
 from .terms import resolve_iri, sql_string, valid_iri
 from .termtypes import (
     ANY_T, BOOL_T, DATETIME_T, DOUBLE_T, INT_T, IRI_T, BNODE_T, JSON_T, NOCONST, NULL, STR_T,
@@ -207,9 +208,14 @@ def _strdt(s: CExpr, dt: CExpr) -> CExpr:
         if t.kind in ("double", "bool"):
             return CExpr(lexs, TType("typed", dt=str(dt.const)))
         return CExpr(lexs, t, s.const if s.is_const else NOCONST)
+    if dt.type.kind == "any":
+        # a datatype known at run time (COALESCE(IRI(...), RAISE(...)), for instance)
+        return CExpr(f"CASE WHEN ({dt.sql}).k = 0 THEN sg_any(2, {lexs}, NULLIF(({dt.sql}).v, "
+                     f"{sql_string(A.XSD_STRING)})) END", ANY_T)
     if dt.type.kind != "iri":
         return NULL
-    return CExpr(f"sg_any(2, {lexs}, {dt.sql})", ANY_T)
+    # xsd:string is the simple literal (RDF 1.1)
+    return CExpr(f"sg_any(2, {lexs}, NULLIF({dt.sql}, {sql_string(A.XSD_STRING)}))", ANY_T)
 
 
 def _strlang(s: CExpr, tag: CExpr) -> CExpr:
@@ -384,7 +390,9 @@ def let_sql(values, body, ctx=None) -> str:
     adds them); else fields of a one-element ``list_transform`` that binds them (a lambda
     evaluates the branches of a CASE eagerly, and DuckDB binds the list of a lambda again
     for each enclosing lambda: the last resort)."""
-    if all(_cheap(e) for e in values.values()):
+    if all(_cheap(e) for e in values.values()) or any(has_raise(e.sql) for e in values.values()):
+        # a RAISE is evaluated where the expression reaches it: neither hoisted into a
+        # column of the operator's input nor bound by a lambda (which evaluates eagerly)
         return body(dict(values))
     if ctx is not None and getattr(ctx, "hoist_ok", False):
         return body({k: e if _cheap(e) else CExpr(ctx.hoist(e.sql), e.type) for k, e in values.items()})
@@ -475,8 +483,81 @@ def _numfn_sql(name: str, x: str) -> str:
 
 
 def _unify_branches(branches: List[CExpr]):
-    t = unify([b.type for b in branches if not b.is_null])
-    return t, [coerce(b, t) if not b.is_null else "NULL" for b in branches]
+    """The common type of alternatives, and their SQL in that type; a RAISE alternative
+    takes the type of the others (its value is never used)."""
+    t = unify([b.type for b in branches if not b.is_null and not isinstance(b, RaiseExpr)])
+    return t, [raise_as(b, t) if isinstance(b, RaiseExpr) else coerce(b, t) if not b.is_null else "NULL"
+               for b in branches]
+
+
+# -- RAISE ---------------------------------------------------------------------------------
+
+
+class RaiseExpr(CExpr):
+    """A compiled ``RAISE(message, value...)``: DuckDB's ``error()`` (macro ``sg_raise``),
+    with the message and the values in its error message (:mod:`raising`).  Its static type
+    is ``any``; as an alternative of ``IF`` or ``COALESCE``, it takes the type of the others.
+    ``raw`` is the call, of SQL type NULL."""
+
+    def __init__(self, raw: str):
+        super().__init__(f"CAST({raw} AS {ANY_SQL_TYPE})", ANY_T)
+        self.raw = raw
+
+
+def raise_as(e: "RaiseExpr", t: TType) -> str:
+    """The SQL of a RAISE in the SQL type of the term type ``t``."""
+    return f"CAST({e.raw} AS {_SQL_TYPES[t.kind]})"
+
+
+_SQL_TYPES = {"iri": "VARCHAR", "bnode": "VARCHAR", "str": "VARCHAR", "lang": "VARCHAR", "typed": "VARCHAR",
+              "int": "BIGINT", "double": "DOUBLE", "bool": "BOOLEAN", "json": "JSON", "any": ANY_SQL_TYPE}
+
+
+def has_raise(sql: str) -> bool:
+    """The SQL evaluates a RAISE expression somewhere."""
+    return RAISE_MACRO + "(" in sql
+
+
+def compile_raise(call: A.Call, ctx) -> CExpr:
+    """``RAISE(message, value...)``: the arguments are evaluated leniently (an unbound or
+    erroneous one is undefined: JSON null), the message and the values are sent as
+    N-Triples terms in the message of the error, after :data:`raising.MARKER`."""
+    args = [compile_expr(a, ctx) for a in call.args]
+    nts = [f"NULL::VARCHAR" if a.is_null else f"{to_nt(a, 'o')}::VARCHAR" for a in args]
+    values = "[" + ", ".join(nts[1:]) + "]::VARCHAR[]"
+    payload = f"({sql_string(MARKER)} || CAST(to_json({{'m': {nts[0]}, 'v': {values}}}) AS VARCHAR))"
+    return RaiseExpr(f"{RAISE_MACRO}({payload})")
+
+
+def conjunction(conds: List[str]) -> str:
+    """The conditions of a FILTER list or of HAVING, all true; with a RAISE after the first
+    one, evaluated in order up to the first that is not true (as Jena's filter does), not
+    in the order DuckDB chooses."""
+    if not any(has_raise(c) for c in conds[1:]):
+        return " AND ".join(conds)
+    return "(CASE " + " ".join(f"WHEN ({c}) IS NOT TRUE THEN FALSE" for c in conds) + " ELSE TRUE END)"
+
+
+def _chain(call: A.Call, name: str) -> list:
+    """The operands of a chain of ``||`` (or ``&&``) in the order of evaluation:
+    ``(a || b) || c`` and ``a || (b || c)`` are ``[a, b, c]``."""
+    out = []
+    for arg in call.args:
+        if isinstance(arg, A.Call) and arg.name == name and len(arg.args) == 2:
+            out.extend(_chain(arg, name))
+        else:
+            out.append(arg)
+    return out
+
+
+def _lazy_chain(name: str, ops: List[str]) -> str:
+    """``a1 || ... || an`` evaluating the operands in order up to the first true one (``&&``:
+    false one), as the Java engine does; else unbound (an error) if one of them is, else
+    false (``&&``: true)."""
+    stop, other = ("TRUE", "FALSE") if name == "||" else ("FALSE", "TRUE")
+    whens = " ".join(f"WHEN ({o}) IS {stop} THEN {stop}" for o in ops)
+    nulls = " OR ".join(f"({o}) IS NULL" for o in ops)
+    return f"(CASE {whens} WHEN {nulls} THEN NULL ELSE {other} END)"
 
 
 # -- function calls -----------------------------------------------------------
@@ -514,11 +595,18 @@ def compile_call(call: A.Call, ctx) -> CExpr:
         v = _const_ebv(c)
         if v is not None:
             return compile_expr(call.args[1] if v else call.args[2], ctx)
+    if name == "RAISE":
+        return compile_raise(call, ctx)
+    if name in ("||", "&&") and len(call.args) == 2:
+        # a chain (a || b || c ...) is compiled once, as one operator
+        ops = [_ebv(compile_expr(o, ctx)) for o in _chain(call, name)]
+        if any(has_raise(o) for o in ops[1:]):
+            # DuckDB evaluates every operand of OR and AND: a RAISE is evaluated only when
+            # the operands on its left do not decide (one CASE over the chain, each operand
+            # copied twice; nested binary CASEs would copy the left operand at each level)
+            return CExpr(_lazy_chain(name, ops), BOOL_T)
+        return CExpr("(" + f" {'OR' if name == '||' else 'AND'} ".join(ops) + ")", BOOL_T)
     args = [compile_expr(a, ctx) for a in call.args]
-    if name in ("||", "&&"):
-        a, b = args
-        ea, eb = _ebv(a), _ebv(b)
-        return CExpr(f"({ea} {'OR' if name == '||' else 'AND'} {eb})", BOOL_T)
     if name == "!":
         return CExpr(f"(NOT {_ebv(args[0])})", BOOL_T)
     if name in ("=", "!=", "<", ">", "<=", ">="):
@@ -546,6 +634,9 @@ def compile_call(call: A.Call, ctx) -> CExpr:
         if not tests:
             return const_bool(name == "NOT IN")
         sql = "(" + " OR ".join(t.sql for t in tests) + ")"
+        if any(has_raise(t.sql) for t in tests[1:]):
+            # the members in order, up to the first one that is equal (as Jena's E_OneOf)
+            sql = "(CASE " + " ".join(f"WHEN ({t.sql}) IS TRUE THEN TRUE" for t in tests) + f" ELSE {sql} END)"
         return CExpr(sql if name == "IN" else f"(NOT {sql})", BOOL_T)
     if name == "BOUND":
         e = args[0]
@@ -1076,7 +1167,8 @@ def _cast(dt: str, e: CExpr) -> CExpr:
     return CExpr(lex(e), TType("typed", dt=dt), e.const if e.is_const else NOCONST)
 
 
-EXTRA_SUPPORT_SQL = """
+EXTRA_SUPPORT_SQL = f"""
+CREATE OR REPLACE MACRO {RAISE_MACRO}(m) AS error(m);
 CREATE OR REPLACE MACRO sg_num_rank(x) AS CASE WHEN x.k <> 2 THEN NULL
     WHEN x.d = 'http://www.w3.org/2001/XMLSchema#double' THEN 3 WHEN x.d = 'http://www.w3.org/2001/XMLSchema#float' THEN 2 WHEN x.d = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1
     WHEN x.d IN ('http://www.w3.org/2001/XMLSchema#byte', 'http://www.w3.org/2001/XMLSchema#int', 'http://www.w3.org/2001/XMLSchema#integer', 'http://www.w3.org/2001/XMLSchema#long', 'http://www.w3.org/2001/XMLSchema#negativeInteger', 'http://www.w3.org/2001/XMLSchema#nonNegativeInteger', 'http://www.w3.org/2001/XMLSchema#nonPositiveInteger', 'http://www.w3.org/2001/XMLSchema#positiveInteger', 'http://www.w3.org/2001/XMLSchema#short', 'http://www.w3.org/2001/XMLSchema#unsignedByte', 'http://www.w3.org/2001/XMLSchema#unsignedInt', 'http://www.w3.org/2001/XMLSchema#unsignedLong', 'http://www.w3.org/2001/XMLSchema#unsignedShort') THEN 0 ELSE NULL END;

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0 (2026-11-26)
+
+Parity with the Java engine 2.6.0 and the RML translator rml-to-sparql-generate 0.3.0.
+
+- `RAISE(message, value...)`: an expression whose evaluation stops the execution with an
+  error that carries a message and values, raised as `sparql_generate.RaiseError`
+  (`message`, `values` as N-Triples terms, `None` for a value that could not be evaluated;
+  `str(e)` as the Java engine writes it, `No email address for: "Bob", 1`). It is evaluated
+  only when its value is needed, as in the Java engine: in a branch of `IF` or `COALESCE`, on
+  the right of `||` and `&&`, in a member of `IN`, in a `FILTER` after others; a `BIND` is
+  evaluated for each solution, also when nothing reads its variable. The command line writes
+  the message and the values on the standard error, with status 1. `raise` is a keyword.
+- `--graphs-to-files` (key `graphsToFiles`) and `--targets targets.json` (key `targets`):
+  the named graphs whose IRI is a relative path to an RDF file are written to these files, as
+  the Java command line 2.6.0 does: format and compression by the extension (`.nq`, `.nt`,
+  `.ttl`, `.trig`, `.n3`, `.jsonld`, `.rdf`, `.rj`; `.gz`, `.zip`, `.bz2`, `.xz`, `.tar.gz`,
+  `.tar.xz`, `.tar.bz2`) or by the description of the targets (format, compression, character
+  encoding), `GRAPH <dump.nq#g=IRI>` for a graph inside a file, the folder of a `file:` base
+  or else the working directory, unsafe paths refused with the messages of the Java engine.
+  In the API, `Execution.graphs_to_files(targets=None, output_dir=None)`, and
+  `sparql_generate.TargetError`.
+- `iter:CSVHeaders` on the IRI of a CSV document reads its header line only (also from a
+  compressed or UTF-16 file); an empty header cell is the empty string.
+- `GROUP BY` on keys that are constant (a variable that is never bound) gives no group on an
+  empty input, as SPARQL and Jena; it gave one.
+- Relative IRIs are resolved as RFC 3986 says, as Jena does: empty path segments are kept
+  (`<a//b>`); Python's `urljoin` dropped them.
+- The cases of `tests/cases` and the test cases of the Java engine with an expected error
+  (`expected_error.txt`, the message of a `RAISE`) are checked against the Java engine 2.6.0.
+- `CITATION.cff`.
+
 ## 0.2.0 (2026-11-26)
 
 Parity with the Java engine 2.5.0 on the queries that the RML translator

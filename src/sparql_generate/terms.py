@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from . import ast as A
 
@@ -28,17 +28,68 @@ def resolve_iri(ref: str, base: Optional[str], template: bool = False) -> str:
         return base
     if template and not ref:
         return base
-    # urljoin knows a fixed list of schemes for hierarchical references; force
-    # generic behaviour by swapping the scheme when needed.
-    parts = urlsplit(base)
-    scheme = parts.scheme
-    if scheme and scheme not in ("http", "https", "file", "ftp", "urn"):
-        fake = "http" + base[len(scheme):]
-        out = urljoin(fake, ref)
-        return scheme + out[len("http"):]
-    if scheme == "urn":
+    if urlsplit(base).scheme == "urn":
         return base + ref
-    return urljoin(base, ref)
+    return _resolve_rfc3986(ref, base)
+
+
+_URI_REF = re.compile(r"^(?:([^:/?#]+):)?(?://([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$", re.S)
+
+
+def _resolve_rfc3986(ref: str, base: str) -> str:
+    """RFC 3986 section 5.2 (as Jena resolves IRIs; ``urljoin`` drops empty segments)."""
+    rs, ra, rp, rq, rf = _URI_REF.match(ref).groups()
+    bs, ba, bp, bq, _ = _URI_REF.match(base).groups()
+    if rs is not None:
+        s, a, p, q = rs, ra, _remove_dot_segments(rp), rq
+    elif ra is not None:
+        s, a, p, q = bs, ra, _remove_dot_segments(rp), rq
+    else:
+        s, a = bs, ba
+        if rp == "":
+            p, q = bp, (rq if rq is not None else bq)
+        else:
+            if rp.startswith("/"):
+                p = _remove_dot_segments(rp)
+            elif ba is not None and bp == "":
+                p = _remove_dot_segments("/" + rp)
+            else:
+                p = _remove_dot_segments(bp[:bp.rfind("/") + 1] + rp)
+            q = rq
+    out = (s + ":" if s is not None else "") + ("//" + a if a is not None else "") + p
+    if q is not None:
+        out += "?" + q
+    if rf is not None:
+        out += "#" + rf
+    return out
+
+
+def _remove_dot_segments(path: str) -> str:
+    out = []
+    while path:
+        if path.startswith("../"):
+            path = path[3:]
+        elif path.startswith("./"):
+            path = path[2:]
+        elif path.startswith("/./"):
+            path = path[2:]
+        elif path == "/.":
+            path = "/"
+        elif path.startswith("/../"):
+            path = path[3:]
+            if out:
+                out.pop()
+        elif path == "/..":
+            path = "/"
+            if out:
+                out.pop()
+        elif path in (".", ".."):
+            path = ""
+        else:
+            i = path.find("/", 1)
+            seg, path = (path, "") if i < 0 else (path[:i], path[i:])
+            out.append(seg)
+    return "".join(out)
 
 
 def valid_iri(s: str) -> bool:

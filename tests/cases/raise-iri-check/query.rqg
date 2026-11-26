@@ -1,0 +1,11 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# The IRI check of the queries that rml-to-sparql-generate 0.3.0 writes for RML-Core: the
+# value of a reference that is not a valid IRI raises an error.
+GENERATE {
+  ?s ex:email ?email .
+} ITERATOR iter:CSV(<people.csv>, "name", "email") AS ?name ?l
+  BIND(COALESCE(IRI(CONCAT("http://example.com/p/", ?name)), IF(BOUND(?name), RAISE("not an IRI", ?name), ?none)) AS ?s)
+  BIND(STR(?l) AS ?email)

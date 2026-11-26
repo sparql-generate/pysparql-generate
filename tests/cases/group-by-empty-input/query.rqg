@@ -1,0 +1,11 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# GROUP BY on a variable that is never bound gives one group, and no group on an empty
+# input; without GROUP BY, an aggregate gives one solution on an empty input.
+GENERATE {
+  GENERATE { ex:grouped ex:count ?n } ITERATOR iter:for(0, 1, 0) AS ?x WHERE { } GROUP BY ?none EXPRESSIONS (COUNT(?x) AS ?n) .
+  GENERATE { ex:implicit ex:count ?n } ITERATOR iter:for(0, 1, 0) AS ?x WHERE { } EXPRESSIONS (COUNT(?x) AS ?n) .
+  GENERATE { ex:onegroup ex:count ?n } ITERATOR iter:for(0, 1, 4) AS ?x WHERE { } GROUP BY ?none EXPRESSIONS (COUNT(?x) AS ?n) .
+}

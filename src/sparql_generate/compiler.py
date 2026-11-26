@@ -446,6 +446,10 @@ class Compiler:
             new = Rel(f"(SELECT {e.sql} AS {col})")
         else:
             new = Rel(f"(SELECT *, {e.sql} AS {col} FROM {rel.sql})")
+        if E.has_raise(e.sql):
+            # a RAISE is evaluated for each row that reaches the BIND, also when nothing reads
+            # the variable (DuckDB drops the columns that nothing reads)
+            new = Rel(f"(SELECT * FROM {new.sql} WHERE {col} IS NULL OR {col} IS NOT NULL)")
         ctx.scope[var.name] = CExpr(col, e.type)
         return new
 
@@ -748,7 +752,7 @@ class Compiler:
             ctx.begin_operator(rel=rel)
             conds = [E._ebv(compile_expr(f, ctx)) for f in filters]
             rel = self.ensure_uid(ctx, rel)
-            rel = Rel(f"(SELECT * FROM {rel.sql} WHERE {' AND '.join(conds)})")
+            rel = Rel(f"(SELECT * FROM {rel.sql} WHERE {E.conjunction(conds)})")
         return rel
 
     def lift_embedded_terms(self, ctx: LevelContext, group: A.Group) -> A.Group:
@@ -1027,6 +1031,10 @@ class Compiler:
             new_scope[f"\x00agg:{i}"] = ctx.agg_columns[agg]  # carried to the solution table
         if not sel:
             sel.append("count(*) AS __cnt")
+        if not keys and query.group_by:
+            # GROUP BY on constant keys: one group, none on an empty input (SPARQL, Jena);
+            # only an implicit group gives a solution on an empty input
+            keys.append("NULL::VARCHAR")
         gb = f" GROUP BY {', '.join(keys)}" if keys else ""
         rel = self.ensure_uid(ctx, rel)
         new = Rel(f"(SELECT {', '.join(sel)} FROM {rel.sql}{gb})")
@@ -1035,7 +1043,7 @@ class Compiler:
             ctx.begin_operator(rel=new)
             conds = [E._ebv(compile_expr(h, ctx)) for h in query.having]
             new = self.ensure_uid(ctx, new)
-            new = Rel(f"(SELECT * FROM {new.sql} WHERE {' AND '.join(conds)})")
+            new = Rel(f"(SELECT * FROM {new.sql} WHERE {E.conjunction(conds)})")
         return new
 
     def parent_columns(self, ctx: LevelContext) -> List[str]:
@@ -1137,7 +1145,10 @@ class Compiler:
         if query.kind == "GENERATE" and query.generate_clause:
             extra += self.prepare_template_columns(ctx, query)
         sep = ", " if extra else ""
-        if self.inline_level(ctx, query, extra):
+        ctx.inline_patterns = None
+        if not E.has_raise(body + "".join(extra)) and self.inline_level(ctx, query, extra):
+            # (a level that evaluates a RAISE is written: every solution reaches it, whatever
+            # the output reads)
             # rule (MAT), simple level: nothing reads the row id and the output is one
             # statement, which scans the relation once
             return f"(SELECT *{sep}{', '.join(extra)} FROM ({body}))"

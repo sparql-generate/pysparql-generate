@@ -15,7 +15,8 @@ import time
 
 import duckdb
 
-from . import Execution, ParseError, CompileError, QUAD_FORMATS, QuadsNotSupported, load_conf, __version__
+from . import (Execution, ParseError, CompileError, QUAD_FORMATS, QuadsNotSupported, RaiseError, TargetError,
+               load_conf, __version__)
 from .ast import has_quad_patterns
 
 
@@ -46,6 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="read the streams of iter:WebSocket and iter:MQTTSubscribe for at most so many seconds")
     p.add_argument("--fail-on-missing", action="store_true", default=None,
                    help="fail (status 1) when a document, a graph or a named query cannot be found")
+    p.add_argument("--graphs-to-files", action="store_true", default=None,
+                   help="GENERATE: write each named graph whose IRI is the folder of the base followed by the path "
+                        "of an RDF file (GRAPH <out/people.ttl>, format and compression by extension) to that file, in "
+                        "the folder of a file: base or else in the working directory; GRAPH <dump.nq#g=IRI> names "
+                        "the graph IRI in dump.nq. The other graphs stay in the output.")
+    p.add_argument("--targets", default=None, metavar="FILE",
+                   help="a JSON file that describes the target files of --graphs-to-files (implied): "
+                        "{\"path\": {\"format\": \"N-Quads\", \"compression\": \"gzip\", \"encoding\": \"UTF-16\"}}, "
+                        "paths relative to the output folder")
     p.add_argument("-x", "--syntax", action="store_true", help="only check the syntax of the query")
     p.add_argument("--explain", action="store_true", help="print the compiled SQL plan")
     p.add_argument("--time", action="store_true", help="print timings to stderr")
@@ -107,6 +117,21 @@ def main(argv=None) -> int:
             b[var.lstrip("?$")] = Parser(term).parse_var_or_term()
         bindings = [b]
 
+    # --graphs-to-files, --targets (relative to the current directory; the key targets of the
+    # configuration file, to the working directory), as the Java command line 2.6.0
+    graphs_to_files = bool(args.graphs_to_files or (conf or {}).get("graphsToFiles"))
+    targets = os.path.abspath(args.targets) if args.targets else None
+    if targets is None and (conf or {}).get("targets"):
+        targets = os.path.join(os.path.abspath(dir_), conf["targets"])
+    graphs_to_files = graphs_to_files or targets is not None
+    base = args.base
+    if graphs_to_files and base is None and not (conf or {}).get("base"):
+        # as Jena: without base, the relative IRIs of the query are resolved against the
+        # current directory, where the files are written
+        from pathlib import Path
+
+        base = Path.cwd().as_uri() + "/"
+
     if args.syntax:
         from .parser import parse
 
@@ -119,7 +144,7 @@ def main(argv=None) -> int:
         return 0
 
     try:
-        ex = Execution(query_text, base=args.base, documents=documents, base_dir=dir_, named_queries=named or None,
+        ex = Execution(query_text, base=base, documents=documents, base_dir=dir_, named_queries=named or None,
                        dataset=dataset, bindings=bindings, conf=conf, allow_network=not args.no_network,
                        threads=args.threads, memory_limit=args.memory_limit, debug=args.explain,
                        fail_on_missing=args.fail_on_missing, stream_messages=args.stream_messages,
@@ -127,8 +152,22 @@ def main(argv=None) -> int:
     except (ParseError, CompileError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    except RaiseError as e:
+        # RAISE(message, value...) in the query: its message and values, status 1
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     for w in ex.warnings:
         log.warning(w)
+    if graphs_to_files:
+        if ex.plan.kind != "GENERATE":
+            log.warning("--graphs-to-files and --targets apply to GENERATE queries only.")
+        else:
+            try:
+                ex.graphs_to_files(targets=targets, output_dir=dir_)
+            except (TargetError, RaiseError, CompileError) as e:
+                print(f"error: {e}", file=sys.stderr)
+                ex.close()
+                return 1
     t1 = time.perf_counter()
     if args.explain:
         for s in ex.engine.sql_log:
@@ -142,7 +181,13 @@ def main(argv=None) -> int:
         else:
             print(ex.plan.select_sql + ";", file=sys.stderr)
     fmt = (args.format_output or ("TEXT" if ex.plan.kind != "GENERATE" else "NQ" if ex.has_quads else "NT")).lower()
-    if ex.has_quads and fmt not in QUAD_FORMATS and _quads_generated(ex):
+    try:
+        refused = ex.has_quads and fmt not in QUAD_FORMATS and _quads_generated(ex, graphs_to_files)
+    except RaiseError as e:
+        print(f"error: {e}", file=sys.stderr)
+        ex.close()
+        return 1
+    if refused:
         # as the Java engine: a format that holds triples only cannot hold the named graphs
         print(f"error: {QuadsNotSupported(_FORMAT_LABELS.get(fmt, args.format_output))}", file=sys.stderr)
         ex.close()
@@ -161,7 +206,7 @@ def main(argv=None) -> int:
                 n = ex.write(out, format=fmt, distinct=args.distinct)
         else:
             n = ex.write(sys.stdout, format=fmt, distinct=args.distinct)
-    except CompileError as e:
+    except (CompileError, RaiseError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     except duckdb.Error as e:  # an error raised while the rows are computed (a UDF's lookup)
@@ -181,12 +226,13 @@ _FORMAT_LABELS = {"nt": "N-Triples", "ntriples": "N-Triples", "n-triples": "N-Tr
                   "jsonld": "JSON-LD"}
 
 
-def _quads_generated(ex) -> bool:
+def _quads_generated(ex, graphs_to_files: bool = False) -> bool:
     """The query has GRAPH blocks (refused before the execution, as the Java engine does),
-    or the named queries it calls generate quads."""
-    if has_quad_patterns(ex.query):
+    or the named queries it calls generate quads; with --graphs-to-files, a named graph that
+    no file holds reaches the output."""
+    if has_quad_patterns(ex.query) and not graphs_to_files:
         return True
-    return ex.engine.execute(f"SELECT count(*) FROM ({ex.plan.quads_sql()}) WHERE g IS NOT NULL").fetchall()[0][0] > 0
+    return ex.generates_named_graphs()
 
 
 if __name__ == "__main__":  # pragma: no cover

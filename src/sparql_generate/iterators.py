@@ -12,6 +12,7 @@ of two relational shapes (rule ITERATOR):
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -221,11 +222,52 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
 
 @register("CSVHeaders")
 def iter_csv_headers(ctx, args: List[CExpr], nvars: int) -> IterPlan:
-    plan = iter_csv(ctx, args, nvars)
-    if plan.kind != "table":
-        raise IteratorError("iter:CSVHeaders needs a constant document")
-    cols = ctx.engine.describe(f"SELECT * FROM {plan.sql} LIMIT 0")
-    return IterPlan("table", "(SELECT unnest(" + sql_list([c for c, _ in cols]) + ") AS c0)", [("c0", STR_T)])
+    """The cells of the header line of a CSV document (the first record, as the Java
+    engine's CsvMapReader reads it: an empty cell is the empty string).  On the IRI of a
+    document, only its header line is read (the Java engine 2.6.0)."""
+    args = [resolve_doc_arg(ctx, args[0])] + list(args[1:]) if args else args
+    if not args:
+        raise IteratorError("iter:CSVHeaders needs the CSV document")
+    doc = args[0]
+    if doc.is_null:
+        return EMPTY
+    d = _doc_of(doc)
+    if d is not None or doc.is_const:
+        path = d.path if d is not None and d.data is None and d.path and os.path.isfile(d.path) else None
+        if path is not None:
+            from .documents import open_text
+
+            with open_text(path) as f:  # the header line only
+                headers = csv_header(f)
+        else:
+            headers = csv_header(_const_text(doc) or "")
+        if not headers:
+            return EMPTY
+        return IterPlan("table", "(SELECT unnest(" + sql_list(headers) + ") AS c0)", [("c0", STR_T)])
+    engine = ctx.engine
+
+    def udf(text):
+        text = text if text is None or not text.startswith("\x00") else engine.documents_by_uri[text[1:]].text()
+        return None if text is None else csv_header(text)
+
+    name = engine.udf("sg_csv_header", udf, ["VARCHAR"], "VARCHAR[]")
+    return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", [("c0", STR_T)])
+
+
+def csv_header(source) -> List[str]:
+    """The cells of the first record of a CSV text or text file (a UTF-8 byte order mark
+    removed), read without reading the rest."""
+    import csv
+    import io
+
+    f = io.StringIO(source) if isinstance(source, str) else source
+    try:
+        row = next(csv.reader(f))
+    except (StopIteration, csv.Error):
+        return []
+    if row and row[0].startswith("\ufeff"):
+        row[0] = row[0][1:]
+    return row
 
 
 def sql_list(strings: List[str]) -> str:

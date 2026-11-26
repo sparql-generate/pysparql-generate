@@ -1,0 +1,8 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# RAISE in an expression of the template: evaluated for each solution.
+GENERATE {
+  <n/{?x}> ex:value ?{ IF(?x < 3, ?x * 10, RAISE("row {?x} is too large", ?x)) } .
+} ITERATOR iter:for(0, 1, 5) AS ?x

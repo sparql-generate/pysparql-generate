@@ -1,0 +1,5 @@
+PREFIX ex:   <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+ex:s    ex:label  "é"@fr;
+        ex:part   1 .

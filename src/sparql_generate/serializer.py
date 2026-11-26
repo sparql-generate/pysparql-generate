@@ -49,6 +49,11 @@ def serialize_expr(e) -> str:
         return s
     if isinstance(e, A.Call):
         n = e.name
+        if n == "RAISE":
+            from .expressions import CompileError
+
+            raise CompileError("RAISE is not supported in a group evaluated by rdflib "
+                               "(nested closures, SERVICE, EXISTS in OPTIONAL filters)")
         args = [serialize_expr(a) for a in e.args]
         if n in _INFIX:
             return f"({args[0]} {n} {args[1]})"

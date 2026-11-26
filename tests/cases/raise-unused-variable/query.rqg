@@ -1,0 +1,9 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# A BIND is evaluated for each solution, also when nothing reads its variable.
+GENERATE {
+  <n/{?x}> a ex:Number .
+} ITERATOR iter:for(0, 1, 10) AS ?x
+  BIND(IF(?x = 7, RAISE("seven", ?x), ?x) AS ?unused)

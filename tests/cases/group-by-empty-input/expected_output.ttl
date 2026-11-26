@@ -1,0 +1,2 @@
+<http://example.com/implicit> <http://example.com/count> "0"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://example.com/onegroup> <http://example.com/count> "4"^^<http://www.w3.org/2001/XMLSchema#integer> .

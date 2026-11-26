@@ -99,6 +99,15 @@ query text ──lexer.py──▶ tokens ──parser.py──▶ ast.Query
     evaluates it, the result comes back as an Arrow table of dynamic terms.
 13. **`__init__.py`** – public API (`Execution`, `generate`, `generate_to`, `to_graph`,
     `template`, `select`, `load_conf`). **`cli.py`** – `sparql-generate-py`.
+14. **`raising.py`** – `RAISE(message, value...)`: `RaiseError`, the payload of the DuckDB
+    error (`MARKER` + JSON of the message and values as N-Triples terms) and its formatting
+    as Jena's `FmtUtils` (`format_node`). `Engine.execute` and the readers of `__init__.py`
+    turn a DuckDB error that carries the payload into a `RaiseError`.
+15. **`targets.py`** – `--graphs-to-files`, `--targets`: `GraphTargets` resolves a graph
+    name to a target file (folder, format, compression, encoding, `#g=` graph, safety checks,
+    the messages of the Java engine), `write_target` writes one file.
+    `Execution.graphs_to_files()` writes the quads of the named graphs into a temporary
+    table, routes the graphs that name files to them, and leaves the others in the outputs.
 
 ## Where the delicate semantics live
 
@@ -142,6 +151,16 @@ query text ──lexer.py──▶ tokens ──parser.py──▶ ast.Query
 * **Literals** – `sg_q(x)` (`to_json`) writes the quoted N-Triples string: JSON escapes are
   N-Triples escapes, and it is ≈ 5× faster than chained `replace()`. The BGP keys of the
   dataset use it too (`bgp.constant_nt` mirrors it with `json.dumps`).
+* **RAISE** – `expressions.compile_raise` writes DuckDB's `error()` (macro `sg_raise`, which
+  DuckDB never folds: `error` is volatile). It must be evaluated exactly where the Java engine
+  evaluates it: `CASE` and `COALESCE` are lazy in DuckDB, `OR`, `AND` and the conjunctions
+  of a `WHERE` are not, so `||`, `&&`, `IN` and the lists of filters are compiled to `CASE`
+  chains when an operand after the first holds a `RAISE` (`has_raise`, `conjunction`);
+  `let_sql` neither hoists nor binds by a lambda an operand with a `RAISE`; a `BIND` with a
+  `RAISE` filters on its column (`col IS NULL OR col IS NOT NULL`), which DuckDB cannot drop
+  when nothing reads the column; and a level whose relation holds a `RAISE` is materialised
+  (`inline_level` skipped), so that a template that reads nothing (`GENERATE { }`) still
+  evaluates it.
 * **Unbound / errors** – NULL everywhere; `emit_triple()` filters `IS NOT NULL` on the
   N-Triples terms, `to_nt` returns NULL for literal subjects and non-IRI predicates.
 * **LIST(e)** – `output_list()`: cells labelled by `__idx` within the level, `__n` rows.

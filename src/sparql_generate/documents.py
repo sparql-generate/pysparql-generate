@@ -132,6 +132,21 @@ def open_content(path: str):
     return open(path, "rb")
 
 
+def open_text(path: str):
+    """A text stream of the content of a local file, decompressed according to the extension
+    of its name and decoded from UTF-8, or from UTF-16 or UTF-32 after a byte order mark,
+    read as it is consumed (``decoded_path`` writes the whole content)."""
+    import io
+
+    f = open_content(path) if compression(os.path.basename(path)) is not None else open(path, "rb")
+    f = io.BufferedReader(f) if not hasattr(f, "peek") else f
+    head = f.peek(4)[:4]
+    bom, enc = next(((b, e) for b, e in _BOMS if head.startswith(b)), (b"", "utf-8"))
+    if bom:
+        f.read(len(bom))
+    return io.TextIOWrapper(f, encoding=enc, errors="replace", newline="")
+
+
 def decoded_path(path: str) -> str:
     """``path`` itself, or the path of a temporary file of its content decompressed
     (:func:`open_content`) and in UTF-8 when it starts with a UTF-16 or UTF-32 byte order mark

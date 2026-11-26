@@ -1,0 +1,1 @@
+values: "a\"b", "chat"@fr, 3, 2.50, true, "2026-11-26"^^xsd:date, xsd:string, rdf:type, <http://example.com/a>, "x"^^<http://example.com/dt>, UNDEF, UNDEF, 3

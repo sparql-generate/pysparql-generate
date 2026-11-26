@@ -1,0 +1,5 @@
+<http://example.com/base/a//b> <http://example.com/p> <http://example.com/base/d> .
+<http://example.com/base/a//b> <http://example.com/p> <http://example.com/e//f> .
+<http://example.com/base/a//b> <http://example.com/p> <http://example.com/base/g/> .
+<http://example.com/base/a//b> <http://example.com/p> <http://host/h> .
+<http://example.com/base/a//b> <http://example.com/p> <http://example.com/base/?q> .

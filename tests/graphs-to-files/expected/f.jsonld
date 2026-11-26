@@ -1,0 +1,21 @@
+{
+    "@id": "ex:s",
+    "ex:json": [
+        {
+            "@value": "3",
+            "@type": "http://www.w3.org/2001/XMLSchema#integer"
+        },
+        {
+            "@value": "2",
+            "@type": "http://www.w3.org/2001/XMLSchema#integer"
+        },
+        {
+            "@value": "1",
+            "@type": "http://www.w3.org/2001/XMLSchema#integer"
+        }
+    ],
+    "@context": {
+        "ex": "http://example.com/",
+        "iter": "http://w3id.org/sparql-generate/iter/"
+    }
+}

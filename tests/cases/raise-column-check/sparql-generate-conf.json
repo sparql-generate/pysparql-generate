@@ -1,0 +1,4 @@
+{
+    "documentset": [ { "uri": "http://example.com/people.csv", "path": "documentset/people.csv", "mediatype": "text/csv" } ],
+    "query": "query.rqg"
+}

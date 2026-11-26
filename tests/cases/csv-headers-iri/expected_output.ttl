@@ -1,0 +1,4 @@
+<http://example.com/headers> <http://example.com/header> "a" .
+<http://example.com/headers> <http://example.com/header> "" .
+<http://example.com/headers> <http://example.com/header> "b\nc" .
+<http://example.com/headers> <http://example.com/header> "d" .

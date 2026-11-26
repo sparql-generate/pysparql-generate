@@ -1,0 +1,4 @@
+{
+  "utf16.nq": { "encoding": "UTF-16" },
+  "noext": { "format": "N-Triples", "compression": "gzip" }
+}

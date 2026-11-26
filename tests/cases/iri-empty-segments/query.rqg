@@ -1,0 +1,7 @@
+BASE <http://example.com/base/>
+PREFIX ex: <http://example.com/>
+
+# Relative IRIs resolved as RFC 3986 does: empty segments are kept, dot segments removed.
+GENERATE {
+  <a//b> ex:p <./c/../d>, <../e//f>, <g/.>, <//host/h>, <?q> .
+}

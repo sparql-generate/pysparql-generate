@@ -1,0 +1,15 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+
+# RAISE is evaluated only when its value is needed: ||, &&, COALESCE, IF and IN decide
+# without it on every row, so no error is raised.
+GENERATE {
+  <n/{?x}> ex:or ?a ; ex:and ?b ; ex:coalesce ?c ; ex:in ?d ; ex:notin ?e ; ex:if ?f .
+} ITERATOR iter:for(0, 1, 20) AS ?x
+  BIND(IF(?x >= 0 || RAISE("or", ?x), "or", "no") AS ?a)
+  BIND(IF(?x < 0 && RAISE("and", ?x), "no", "and") AS ?b)
+  BIND(COALESCE(?x * 2, RAISE("coalesce", ?x)) AS ?c)
+  BIND(IF(?x IN (?x, RAISE("in", ?x)), "in", "no") AS ?d)
+  BIND(IF(?x NOT IN (-1, ?x, RAISE("not in", ?x)), "no", "notin") AS ?e)
+  BIND(IF(?x < 100, ?x, RAISE("if", ?x)) AS ?f)
