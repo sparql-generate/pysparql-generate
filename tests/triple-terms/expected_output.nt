@@ -1,0 +1,18 @@
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/q> <http://ex.org/z1> .
+<http://ex.org/a> <http://ex.org/says> <<( <http://ex.org/s2> <http://ex.org/p> <<( <http://ex.org/s> <http://ex.org/p> "x\"o1\"y" )>> )>> .
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/isTriple> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/subject> <http://ex.org/s> .
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/predicate> <http://ex.org/p> .
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/object> <<( <http://ex.org/s> <http://ex.org/p> "x\"o1\"y" )>> .
+<<( <http://ex.org/s> <http://ex.org/p> "o1" )>> <http://ex.org/str> "<< <http://ex.org/s2> <http://ex.org/p> <<( <http://ex.org/s> <http://ex.org/p> \"x\\\"o1\\\"y\" )>> >>" .
+<<( "o1" <http://ex.org/p> "1.5"^^<http://www.w3.org/2001/XMLSchema#decimal> )>> <http://ex.org/p> <http://ex.org/o> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/q> <http://ex.org/z2> .
+<http://ex.org/a> <http://ex.org/says> <<( <http://ex.org/s2> <http://ex.org/p> <<( <http://ex.org/s> <http://ex.org/p> "x\"o2\"y" )>> )>> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/isTriple> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/subject> <http://ex.org/s> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/predicate> <http://ex.org/p> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/object> <<( <http://ex.org/s> <http://ex.org/p> "x\"o2\"y" )>> .
+<<( <http://ex.org/s> <http://ex.org/p> "o2" )>> <http://ex.org/str> "<< <http://ex.org/s2> <http://ex.org/p> <<( <http://ex.org/s> <http://ex.org/p> \"x\\\"o2\\\"y\" )>> >>" .
+<<( "o2" <http://ex.org/p> "1.5"^^<http://www.w3.org/2001/XMLSchema#decimal> )>> <http://ex.org/p> <http://ex.org/o> .
+<http://ex.org/r/o1> <http://ex.org/quoted> <<( <http://ex.org/s> <http://ex.org/p> "o1" )>> .
+<http://ex.org/r/o2> <http://ex.org/quoted> <<( <http://ex.org/s> <http://ex.org/p> "o2" )>> .

@@ -1,0 +1,11 @@
+<http://ex.org/s/1> <http://ex.org/constant> "1" .
+<http://ex.org/s/1> <http://ex.org/constant2> "1" .
+<http://ex.org/s/2> <http://ex.org/constant> "2" .
+<http://ex.org/s/2> <http://ex.org/constant2> "2" .
+<http://ex.org/s/2> <http://ex.org/computed> "2" <http://ex.org/g2> .
+<http://ex.org/s/3> <http://ex.org/constant> "3" .
+<http://ex.org/s/3> <http://ex.org/constant2> "3" .
+<http://ex.org/s/3> <http://ex.org/computed> "3" .
+<http://ex.org/s/1> <http://ex.org/inner> "1" .
+<http://ex.org/s/2> <http://ex.org/inner> "2" .
+<http://ex.org/s/3> <http://ex.org/inner> "3" .

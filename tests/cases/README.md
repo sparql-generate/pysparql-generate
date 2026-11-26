@@ -13,3 +13,8 @@ isomorphism).
 - `quads-*`: expected outputs produced by the Java engine 2.3.2-SNAPSHOT of the branch
   `quad-patterns` (GRAPH blocks in GENERATE templates, work in progress on 2026-11-22,
   JDK 21), with `-fo NQUADS`.
+- `csv-row-position`, `compressed-sources`, `quads-default-graph-node`, `replace-flags`,
+  `title-case`, `optional-bind-constant`: expected outputs produced by the Java engine 2.5.0
+  (release JAR, 2026-11-26, JDK 21), with `-fo NT`, or `-fo NQUADS` for the quads.
+  `tests/triple-terms` (outside this directory: rdflib reads no RDF 1.2 triple term) is
+  compared line by line with the 2.5.0 output by `tests/test_triple_terms.py`.

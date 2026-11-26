@@ -1,0 +1,15 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# Jena's names of the default graph, <urn:x-arq:DefaultGraphNode> and
+# <urn:x-arq:DefaultGraph>, as graph names of GRAPH blocks: triples of the default graph
+GENERATE {
+  GRAPH <urn:x-arq:DefaultGraphNode> { ?s ex:constant ?id . }
+  GRAPH <urn:x-arq:DefaultGraph> { ?s ex:constant2 ?id . }
+  GRAPH ?g { ?s ex:computed ?id . }
+  GENERATE { ?s ex:inner ?id . } .
+}
+ITERATOR iter:CSV(<rows.csv>, "id", "g") AS ?id ?gs
+WHERE {
+  BIND(IRI(CONCAT("http://ex.org/s/", ?id)) AS ?s)
+  BIND(IF(?gs = "DEFAULT", <urn:x-arq:DefaultGraphNode>, IRI(?gs)) AS ?g)
+}

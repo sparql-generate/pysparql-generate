@@ -39,6 +39,7 @@ class IterPlan:
     lockstep: Optional[List[str]] = None  # unnest: several list expressions unnested together
     struct: bool = False  # unnest: the list holds STRUCTs whose fields are ``columns``
     batch: Optional[int] = None  # rows per batch (iter:CSV, iter:JSONSurfer): see Compiler.compile_iterator
+    pos_column: Optional[str] = None  # table: the column of the position of the row in the document (batches)
 
 
 ITERATORS: Dict[str, Callable] = {}
@@ -130,16 +131,41 @@ def iter_csv(ctx, args: List[CExpr], nvars: int) -> IterPlan:
         cols = ctx.engine.describe(f"SELECT * FROM {src} LIMIT 0")
     colnames = [c for c, _ in cols]
     if names is not None:
-        missing = [n for n in names if n not in colnames]
+        idx = [header_index(colnames, n) for n in names]
+        missing = [n for n, j in zip(names, idx) if j is None]
         if missing:
             # as the Java engine: the variable of a column absent from the header is unbound
             ctx.warnings.append(f"iter:CSV: columns {missing} not found in the header {colnames}: unbound")
-        sel = ", ".join(f'"{n}" AS c{i}' if n in colnames else f"NULL::VARCHAR AS c{i}" for i, n in enumerate(names))
+        sel = ", ".join(f'{_sql_ident(colnames[j])} AS c{i}' if j is not None else f"NULL::VARCHAR AS c{i}"
+                        for i, j in enumerate(idx))
         out = [(f"c{i}", STR_T) for i in range(len(names))]
+        if nvars > len(names) or batch:
+            # named columns: the output after the last one is the position of the row (from 0,
+            # the header excluded, across batches), as the Java engine 2.5.0
+            sel += f", (row_number() OVER () - 1) AS c{len(names)}"
+            out.append((f"c{len(names)}", INT_T))
+            return IterPlan("table", f"(SELECT {sel} FROM {src})", out, batch=batch, pos_column=f"c{len(names)}")
     else:
-        sel = ", ".join(f'"{n}" AS c{i}' for i, n in enumerate(colnames))
+        sel = ", ".join(f'{_sql_ident(n)} AS c{i}' for i, n in enumerate(colnames))
         out = [(f"c{i}", STR_T) for i in range(len(colnames))]
     return IterPlan("table", f"(SELECT {sel} FROM {src})", out, batch=batch)
+
+
+def header_index(header: List[str], name: str) -> Optional[int]:
+    """The index of the column ``name`` in a CSV header, or None: the first column of that
+    name, else, as the univocity parser of the Java engine (``selectFields``), the first one
+    equal to it ignoring case and the surrounding white space."""
+    if name in header:
+        return header.index(name)
+    norm = name.strip().lower()
+    for j, h in enumerate(header):
+        if h is not None and h.strip().lower() == norm:
+            return j
+    return None
+
+
+def _sql_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _csv_python_table(ctx, path: str, header: bool, quote: str, delim: str) -> str:
@@ -175,15 +201,20 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
         if header:
             hdr = rows[0]
             rows = rows[1:]
-            idx = [hdr.index(nm) if nm in hdr else None for nm in names] if names else list(range(n))
+            idx = [header_index(hdr, nm) for nm in names] if names else list(range(n))
         else:
             idx = list(range(n))
         out = []
-        for r in rows:
-            out.append({f"c{i}": (r[j] if j is not None and j < len(r) and r[j] != "" else None) for i, j in enumerate(idx)})
+        for k, r in enumerate(rows):
+            row = {f"c{i}": (r[j] if j is not None and j < len(r) and r[j] != "" else None) for i, j in enumerate(idx)}
+            if names:
+                row[f"c{n}"] = k
+            out.append(row)
         return out
 
     cols = [(f"c{i}", STR_T) for i in range(n)]
+    if names:
+        cols.append((f"c{n}", INT_T))  # the position of the row, after the named columns
     name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols))
     return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True)
 

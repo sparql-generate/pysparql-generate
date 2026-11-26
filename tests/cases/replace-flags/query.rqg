@@ -1,0 +1,19 @@
+# REPLACE and REGEX with the flag "q" (the pattern is a literal string; as in Jena, the
+# replacement keeps its $n and backslash escapes), and the replacement escapes of
+# Java (\$ a dollar, \\ a backslash, $0 the match), constant or computed
+PREFIX ex: <http://example.com/>
+GENERATE { ex:s ex:p1 ?a ; ex:p2 ?b ; ex:p3 ?c ; ex:p4 ?d ; ex:p5 ?e ; ex:p6 ?f ; ex:p7 ?g ; ex:p8 ?h ; ex:p9 ?i ; ex:p10 ?j ; ex:p11 ?k . }
+WHERE {
+  BIND(REPLACE("a.b.c", ".", "$0-", "q") AS ?a)
+  BIND(REPLACE("a.b.c", ".", "\\$1x", "q") AS ?b)
+  BIND(REPLACE("a.B.c", "b", "X", "qi") AS ?c)
+  BIND(REGEX("a.b", "a.b", "q") AS ?d)
+  BIND(REGEX("axb", "a.b", "q") AS ?e)
+  BIND(REPLACE("a(b", "(", "[", "q") AS ?f)
+  BIND(REPLACE("ab", "b", "\\\\", "q") AS ?g)
+  BIND("\\\\-\\$-$1" AS ?r)
+  BIND(REPLACE("abc", "(b)", ?r) AS ?h)
+  BIND(REPLACE("abc", "(b)", "\\\\-\\$-$1") AS ?i)
+  BIND(REPLACE("a$b", "$", REPLACE("x$\\y", "([$\\\\])", "\\\\$1"), "q") AS ?j)
+  BIND(REPLACE("aBc", "b", "[$0]", "i") AS ?k)
+}

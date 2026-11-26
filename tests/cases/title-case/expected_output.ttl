@@ -1,0 +1,11 @@
+<http://example.com/s> <http://example.com/p> "Hello WORLD" .
+<http://example.com/s> <http://example.com/p> "Two Spaces " .
+<http://example.com/s> <http://example.com/p> "Xyz Dash" .
+<http://example.com/s> <http://example.com/p> "Émile Zola 2nd" .
+<http://example.com/s> <http://example.com/p> "Ab C" .
+<http://example.com/s> <http://example.com/p> "" .
+<http://example.com/s> <http://example.com/q> "[Hello WORLD]" .
+<http://example.com/s> <http://example.com/q> "[Two Spaces ]" .
+<http://example.com/s> <http://example.com/q> "[Xyz Dash]" .
+<http://example.com/s> <http://example.com/q> "[Émile Zola 2nd]" .
+<http://example.com/s> <http://example.com/q> "[Ab C]" .

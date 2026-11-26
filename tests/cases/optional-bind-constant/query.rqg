@@ -1,0 +1,14 @@
+BASE <http://example.com/>
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# A constant bound in an OPTIONAL group (BIND("yes" AS ?t)) is bound on the rows that
+# the group extends only; an IRI with embedded expressions in the WHERE clause, on a
+# variable of the binding clauses, constrains its pattern
+GENERATE {
+  ?p ex:t ?t . ?p ex:u ?u .
+  ?p ex:age ?a .
+}
+ITERATOR iter:Split("alice,bob", ",") AS ?n0
+WHERE { ?p ex:name ?n0 . <person/{?n0}> ex:age ?a .
+  OPTIONAL { ?x ex:tag ?l BIND("yes" AS ?t) FILTER(sameTerm(?l, CONCAT("t-", ?n0))) }
+  OPTIONAL { ?y ex:tag ?l2 FILTER(sameTerm(?l2, CONCAT("t-", ?n0))) BIND("yes" AS ?u) } }

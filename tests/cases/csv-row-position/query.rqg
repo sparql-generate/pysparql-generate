@@ -1,0 +1,21 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# iter:CSV with named columns binds the position of the row (from 0, the header
+# excluded, across batches) after the last column; the names match the header
+# ignoring case and the surrounding white space (univocity's selectFields)
+GENERATE {
+  ?p ex:name ?name ; ex:score ?score ; ex:pos ?pos .
+  GENERATE { ?b ex:batchPos ?pos2 . }
+  ITERATOR iter:CSV(<people.csv>, 2, "ID") AS ?id2 ?pos2
+  WHERE { BIND(IRI(CONCAT("http://ex.org/b/", ?id2)) AS ?b) } .
+  GENERATE { ?a ex:third ?c . }
+  ITERATOR iter:CSV(<people.csv>) AS ?a0 ?b0 ?c
+  WHERE { BIND(IRI(CONCAT("http://ex.org/a/", ?a0)) AS ?a) } .
+  GENERATE { ?s ex:stringPos ?spos . }
+  ITERATOR iter:CSV("""k,v
+x,1
+y,2""", "K") AS ?sid ?spos
+  WHERE { BIND(IRI(CONCAT("http://ex.org/s/", ?sid)) AS ?s) } .
+}
+ITERATOR iter:CSV(<people.csv>, "id", "NAME", "Score") AS ?id ?name ?score ?pos
+WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?p) }

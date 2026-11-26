@@ -31,6 +31,7 @@ class Document:
     data: Optional[Union[bytes, str]] = None
     mediatype: Optional[str] = None
     _text: Optional[str] = field(default=None, repr=False)
+    _decoded: Optional[str] = field(default=None, repr=False)
 
     def guess_mediatype(self) -> str:
         if self.mediatype:
@@ -47,7 +48,7 @@ class Document:
         if self.data is not None:
             return self.data if isinstance(self.data, bytes) else self.data.encode("utf-8")
         if self.path is not None:
-            with open(self.path, "rb") as f:
+            with open(self.local_path(), "rb") as f:
                 return f.read()
         raise FileNotFoundError(self.uri)
 
@@ -62,10 +63,131 @@ class Document:
         return self._text
 
     def local_path(self) -> Optional[str]:
-        """A file path for engines that read files directly, or None."""
+        """A file path for engines that read files directly, or None: the file itself, or,
+        for a compressed file or a UTF-16 or UTF-32 one, a temporary file of its content
+        decompressed and in UTF-8 (:func:`decoded_path`)."""
         if self.path is not None and self.data is None:
-            return self.path
+            if self._decoded is None:
+                self._decoded = decoded_path(self.path)
+            return self._decoded
         return None
+
+
+# -- compressed and UTF-16/UTF-32 files (as the Java engine 2.5.0, DocumentStreams) -----------
+
+_BOMS = ((b"\x00\x00\xfe\xff", "utf-32-be"), (b"\xff\xfe\x00\x00", "utf-32-le"),
+         (b"\xfe\xff", "utf-16-be"), (b"\xff\xfe", "utf-16-le"))
+_TAR = (".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar")
+_TEMP_DIR: Optional[str] = None
+
+
+def compression(name: str) -> Optional[str]:
+    """The compression of a file, from the extension of its name: ``zip``, ``tar`` (with the
+    ``.tar.gz``, ``.tgz``, ``.tar.xz``, ``.txz``, ``.tar.bz2`` and ``.tar`` archives),
+    ``gz``, ``xz``, ``bz2``, or None."""
+    n = name.lower().split("?", 1)[0]
+    if n.endswith(".zip"):
+        return "zip"
+    if n.endswith(_TAR):
+        return "tar"
+    for ext in ("gz", "xz", "bz2"):
+        if n.endswith("." + ext):
+            return ext
+    return None
+
+
+def open_content(path: str):
+    """A binary stream of the content of a file, decompressed according to the extension of
+    its name: ``.gz``, ``.bz2``, ``.xz``; the first file of a ``.zip``, ``.tar``, ``.tar.gz``
+    (``.tgz``), ``.tar.bz2`` or ``.tar.xz`` (``.txz``) archive."""
+    kind = compression(os.path.basename(path))
+    if kind == "zip":
+        import zipfile
+
+        z = zipfile.ZipFile(path)
+        entry = next((i for i in z.infolist() if not i.is_dir()), None)
+        if entry is None:
+            raise OSError(f"empty zip archive: {path}")
+        return z.open(entry)
+    if kind == "tar":
+        import tarfile
+
+        t = tarfile.open(path, "r:*")
+        entry = next((m for m in t if m.isfile()), None)
+        if entry is None:
+            raise OSError(f"no file in tar archive: {path}")
+        return t.extractfile(entry)
+    if kind == "gz":
+        import gzip
+
+        return gzip.open(path, "rb")
+    if kind == "xz":
+        import lzma
+
+        return lzma.open(path, "rb")
+    if kind == "bz2":
+        import bz2
+
+        return bz2.open(path, "rb")
+    return open(path, "rb")
+
+
+def decoded_path(path: str) -> str:
+    """``path`` itself, or the path of a temporary file of its content decompressed
+    (:func:`open_content`) and in UTF-8 when it starts with a UTF-16 or UTF-32 byte order mark
+    (the mark removed), as the Java engine reads a local document.  The temporary files are
+    removed at exit."""
+    if not os.path.isfile(path):
+        return path
+    compressed = compression(os.path.basename(path)) is not None
+    with open_content(path) if compressed else open(path, "rb") as f:
+        head = f.read(4)
+        enc = next((e for bom, e in _BOMS if head.startswith(bom)), None)
+        if not compressed and enc is None:
+            return path
+        global _TEMP_DIR
+        if _TEMP_DIR is None:
+            import atexit
+            import shutil
+            import tempfile
+
+            _TEMP_DIR = tempfile.mkdtemp(prefix="pysparql-generate-")
+            atexit.register(shutil.rmtree, _TEMP_DIR, True)
+        import tempfile
+
+        fd, out_path = tempfile.mkstemp(dir=_TEMP_DIR, suffix="-" + _inner_name(path))
+        with os.fdopen(fd, "wb") as out:
+            if enc is None:
+                out.write(head)
+                while True:
+                    b = f.read(1 << 20)
+                    if not b:
+                        break
+                    out.write(b)
+            else:
+                import codecs
+
+                bom = next(b for b, e in _BOMS if e == enc)
+                rest = head[len(bom):]
+                dec = codecs.getincrementaldecoder(enc)()
+                out.write(dec.decode(rest).encode("utf-8"))
+                while True:
+                    b = f.read(1 << 20)
+                    if not b:
+                        break
+                    out.write(dec.decode(b).encode("utf-8"))
+                out.write(dec.decode(b"", final=True).encode("utf-8"))
+    return out_path
+
+
+def _inner_name(path: str) -> str:
+    """The name of a file without its compression extension (``data.csv.gz`` → ``data.csv``)."""
+    n = os.path.basename(path)
+    low = n.lower()
+    for ext in _TAR + (".zip", ".gz", ".xz", ".bz2"):
+        if low.endswith(ext):
+            return n[: len(n) - len(ext)]
+    return n
 
 
 class DocumentSet:

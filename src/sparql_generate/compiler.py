@@ -58,6 +58,13 @@ class Rel:
 TRIVIAL = Rel("(SELECT 1 AS __one)", trivial=True)
 
 
+# Jena's names of the default graph (Quad.defaultGraphNodeGenerated, Quad.defaultGraphIRI): a
+# quad pattern GRAPH <urn:x-arq:DefaultGraphNode> { ... } generates triples of the default
+# graph, as in the Java engine
+DEFAULT_GRAPH_NAMES = ("urn:x-arq:DefaultGraphNode", "urn:x-arq:DefaultGraph")
+DEFAULT_GRAPH_NAMES_SQL = ", ".join(sql_string("<" + g + ">") for g in DEFAULT_GRAPH_NAMES)
+
+
 @dataclass
 class Plan:
     kind: str
@@ -77,10 +84,13 @@ class Plan:
         return "SELECT u, args FROM (" + " UNION ALL ".join(f"({q})" for q in self.perform_selects) + ") ORDER BY ord"
 
     def triples_sql(self, distinct: bool = False) -> str:
-        """The triples of the default graph."""
-        if not self.triple_selects:
+        """The triples of the default graph (those of the quad patterns whose graph is Jena's
+        name of the default graph included)."""
+        parts = [f"SELECT * FROM ({q})" for q in self.triple_selects]
+        parts += [f"SELECT s, p, o FROM ({q}) WHERE g IN ({DEFAULT_GRAPH_NAMES_SQL})" for q in self.quad_selects]
+        if not parts:
             return "SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o WHERE FALSE"
-        body = "\nUNION ALL\n".join(f"SELECT * FROM ({q})" for q in self.triple_selects)
+        body = "\nUNION ALL\n".join(parts)
         if distinct:
             return f"SELECT DISTINCT s, p, o FROM ({body})"
         return body
@@ -94,7 +104,8 @@ class Plan:
         """The quads of the dataset: the triples of the default graph with ``g`` NULL, then the
         quads of the named graphs, ``g`` the N-Triples term of the graph name."""
         parts = [f"SELECT s, p, o, NULL::VARCHAR AS g FROM ({q})" for q in self.triple_selects]
-        parts += [f"SELECT * FROM ({q})" for q in self.quad_selects]
+        parts += [f"SELECT s, p, o, CASE WHEN g IN ({DEFAULT_GRAPH_NAMES_SQL}) THEN NULL ELSE g END AS g FROM ({q})"
+                  for q in self.quad_selects]
         if not parts:
             return ("SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o, NULL::VARCHAR AS g "
                     "WHERE FALSE")
@@ -467,7 +478,7 @@ class Compiler:
         engine = self.engine
 
         def udf(uri):
-            d = engine.document(uri, accept)
+            d = engine.document(uri, accept) if uri is not None else None
             if d is None:
                 return None
             return {"k": 2, "v": d.text(), "d": d.datatype}
@@ -512,7 +523,7 @@ class Compiler:
             src = plan.sql
             if plan.batch:
                 # rule (BATCH): the k-th batch of every call is evaluated together
-                pos = "__pos" if plan.positional else "(row_number() OVER () - 1)"  # file order
+                pos = plan.pos_column or ("__pos" if plan.positional else "(row_number() OVER () - 1)")  # file order
                 src = f"(SELECT *, {pos} // {int(plan.batch)} AS __bk FROM {plan.sql})"
                 sel.append(self.batch_key(ctx, "t.__bk"))
             if rel.trivial:
@@ -708,6 +719,7 @@ class Compiler:
         property paths, sub-SELECT, SERVICE and EXISTS by the rdflib fallback."""
         from . import bgp
 
+        group = self.lift_embedded_terms(ctx, group)
         needs_dataset = self._needs_dataset(group)
         has_dataset = self.engine.dataset is not None or getattr(ctx, "dataset", None) is not None
         if needs_dataset and not (has_dataset and self.engine.native_where and bgp.supported(group)):
@@ -738,6 +750,91 @@ class Compiler:
             rel = self.ensure_uid(ctx, rel)
             rel = Rel(f"(SELECT * FROM {rel.sql} WHERE {' AND '.join(conds)})")
         return rel
+
+    def lift_embedded_terms(self, ctx: LevelContext, group: A.Group) -> A.Group:
+        """A node of a triple pattern of the WHERE clause with embedded expressions
+        (``<person/{?name}>``, ``"{?x}"``, ``?{e}``) constrains the pattern as a variable bound
+        to its value does: it becomes a fresh variable, bound to the value before the patterns
+        when the expression reads only variables of the input table (of the binding clauses or
+        of the parent query) and the group is the WHERE clause itself, else equal to the value
+        (``FILTER(sameTerm(...))``) in the group of the pattern.  A group without such nodes is
+        returned as it is."""
+        xnodes = (A.XIRI, A.XLiteral, A.XExpr)
+
+        def has_x(g) -> bool:
+            for el in g.elements:
+                if isinstance(el, A.TriplesBlock) and any(
+                        isinstance(n, xnodes) for t in el.triples for n in (t.subject, t.predicate, t.object)):
+                    return True
+                for sub in self._sub_patterns(el):
+                    if has_x(sub):
+                        return True
+            return False
+
+        if not has_x(group):
+            return group
+
+        def pattern_vars(g, acc: set) -> set:
+            for el in g.elements:
+                if isinstance(el, A.TriplesBlock):
+                    for t in el.triples:
+                        for n in (t.subject, t.predicate, t.object):
+                            if isinstance(n, A.Var):
+                                acc.add(n.name)
+                for sub in self._sub_patterns(el):
+                    pattern_vars(sub, acc)
+                if isinstance(el, A.Graph) and isinstance(el.node, A.Var):
+                    acc.add(el.node.name)
+            return acc
+
+        def lift(g, top: bool) -> A.Group:
+            bound = pattern_vars(g, set())
+            binds, out, filters = [], [], []
+
+            def var_for(n):
+                self._xterm_counter = getattr(self, "_xterm_counter", 0) + 1
+                v = A.Var(f"__xterm{self._xterm_counter}")
+                names = {x.name for x in A.iter_vars(n)}
+                if top and names <= set(ctx.scope) and not names & bound:
+                    binds.append(A.Bind(n, v))
+                else:
+                    filters.append(A.Filter(A.Call("SAMETERM", (v, n))))
+                return v
+
+            for el in g.elements:
+                if isinstance(el, A.TriplesBlock):
+                    triples = []
+                    for t in el.triples:
+                        triples.append(A.Triple(*(var_for(n) if isinstance(n, xnodes) else n
+                                                  for n in (t.subject, t.predicate, t.object))))
+                    out.append(A.TriplesBlock(triples))
+                elif isinstance(el, A.Optional_):
+                    out.append(A.Optional_(lift(el.pattern, False)))
+                elif isinstance(el, A.Minus):
+                    out.append(A.Minus(lift(el.pattern, False)))
+                elif isinstance(el, A.Union_):
+                    out.append(A.Union_([lift(p, False) for p in el.patterns]))
+                elif isinstance(el, A.Graph):
+                    out.append(A.Graph(el.node, lift(el.pattern, False)))
+                elif isinstance(el, A.Group):
+                    out.append(lift(el, False))
+                else:
+                    out.append(el)
+            return A.Group(binds + out + filters)
+
+        return lift(group, True)
+
+    @staticmethod
+    def _sub_patterns(el) -> list:
+        if isinstance(el, (A.Optional_, A.Minus)):
+            return [el.pattern]
+        if isinstance(el, A.Union_):
+            return list(el.patterns)
+        if isinstance(el, A.Graph):
+            return [el.pattern]
+        if isinstance(el, A.Group):
+            return [el]
+        return []
 
     @staticmethod
     def _needs_dataset(group: A.Group) -> bool:
@@ -1263,6 +1360,8 @@ class Compiler:
         ``g`` (an N-Triples term); with ``tag``, the rows carry its value first (``k``)."""
         if s.is_null or p.is_null or o.is_null or (g is not None and g.is_null):
             return
+        if g is not None and g.is_const and g.sql in DEFAULT_GRAPH_NAMES_SQL.split(", "):
+            g = None  # GRAPH <urn:x-arq:DefaultGraphNode>: the default graph
         terms = [("s", s), ("p", p), ("o", o)] + ([("g", g)] if g is not None else [])
         if tag is not None:
             terms = [("k", tag)] + terms

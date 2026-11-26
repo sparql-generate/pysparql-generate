@@ -1,0 +1,16 @@
+# fun:titleCase as the Java engine: characters that are neither letters, digits nor white
+# space removed, the first character of each word in upper case, the others kept
+PREFIX ex: <http://example.com/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+GENERATE { ex:s ex:p ?a, ?b, ?c, ?d, ?e, ?f . ex:s ex:q ?v . }
+ITERATOR iter:Split("hello wORLD|  two  spaces |x-y_z dash|émile zola 2nd|a.b, c!|", "\\|") AS ?w
+WHERE {
+  BIND(fun:titleCase("hello wORLD") AS ?a)
+  BIND(fun:titleCase("  two  spaces ") AS ?b)
+  BIND(fun:titleCase("x-y_z dash") AS ?c)
+  BIND(fun:titleCase("émile zola 2nd") AS ?d)
+  BIND(fun:titleCase("a.b, c!") AS ?e)
+  BIND(fun:titleCase("") AS ?f)
+  BIND(CONCAT("[", fun:titleCase(?w), "]") AS ?v)
+}

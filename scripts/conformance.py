@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Run the Java test cases (``sparql-generate-jena/src/test/resources/generate/*``)
 and compare the generated graph with ``expected_output.ttl`` by RDF graph
-isomorphism (or the generated dataset with ``expected_output.nq`` by RDF dataset
-isomorphism, for a query with GRAPH blocks).
+isomorphism (or the generated dataset with ``expected_output.nq`` or
+``expected_output.trig`` by RDF dataset isomorphism, for a query with GRAPH blocks).
 
     python scripts/conformance.py [--tests DIR] [--only NAME ...] [--no-network] [-v]
 """
@@ -33,6 +33,11 @@ def run_case(d: str, allow_network: bool, verbose: bool):
     nq_path = os.path.join(d, "expected_output.nq")
     if os.path.exists(nq_path):  # a dataset (GRAPH blocks): compared by dataset isomorphism
         return run_quads_case(text, conf, nq_path, allow_network, verbose)
+    trig_path = os.path.join(d, "expected_output.trig")
+    if os.path.exists(trig_path):  # a dataset in TriG (the Java test cases of GRAPH blocks)
+        ds = rdflib.Dataset(default_union=False)
+        ds.parse(trig_path, format="trig")
+        return run_quads_case(text, conf, None, allow_network, verbose, expected=ds.serialize(format="nquads"))
     t0 = time.perf_counter()
     with sg.Execution(text, conf=conf, allow_network=allow_network) as ex:
         got = ex.to_graph()
@@ -54,7 +59,7 @@ def run_case(d: str, allow_network: bool, verbose: bool):
     return ok, len(got), len(exp), dt, detail
 
 
-def run_quads_case(text, conf, nq_path, allow_network, verbose):
+def run_quads_case(text, conf, nq_path, allow_network, verbose, expected=None):
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tests"))
     from quadsutil import datasets_isomorphic
 
@@ -63,8 +68,11 @@ def run_quads_case(text, conf, nq_path, allow_network, verbose):
         got = "".join(f"{s} {p} {o}{' ' + g if g is not None else ''} .\n" for s, p, o, g in ex.quads(distinct=True))
         warnings = list(ex.warnings)
     dt = time.perf_counter() - t0
-    with open(nq_path, encoding="utf-8") as f:
-        exp = f.read()
+    if expected is not None:
+        exp = expected
+    else:
+        with open(nq_path, encoding="utf-8") as f:
+            exp = f.read()
     ok, detail = datasets_isomorphic(got, exp)
     detail = ("\n    " + detail) if not ok and verbose else ""
     if warnings and verbose:

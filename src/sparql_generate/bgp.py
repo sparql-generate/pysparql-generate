@@ -709,6 +709,20 @@ class PatternCompiler:
         """``Join(G, P)``, or ``LeftJoin(G, P, F)`` when ``left`` (``condition`` = F)."""
         if g.sql is None and not left and not condition:
             return self._constants_join(g, p)
+        if left:
+            # a constant of the optional side (BIND("x" AS ?v) in OPTIONAL) is bound on the rows
+            # that the optional side extends only: it becomes a column of P
+            consts = [n for n, e in p.scope.items() if e.is_const and not e.is_null
+                      and self.is_var_name(n) and n not in g.scope]
+            if consts:
+                pscope, sel, cols = dict(p.scope), [], set()
+                for n in consts:
+                    col = self.fresh(n)
+                    sel.append(f"{p.scope[n].sql} AS {col}")
+                    pscope[n] = CExpr(col, p.scope[n].type)
+                    cols.add(col)
+                p = Piece(f"(SELECT *, {', '.join(sel)} FROM {p.sql if p.sql is not None else self.one()})",
+                          pscope, set(p.nonnull) | cols)
         gsql = g.sql if g.sql is not None else self.one()
         psql = p.sql if p.sql is not None else self.one()
         shared = [n for n in p.scope if n in g.scope and self.is_var_name(n)]

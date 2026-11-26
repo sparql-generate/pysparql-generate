@@ -34,7 +34,9 @@ query text ──lexer.py──▶ tokens ──parser.py──▶ ast.Query
    lang, typed, int, double, bool, json, any) and the conversions `lex`, `numeric`,
    `to_any`, `to_nt` (N-Triples serialisation by position, NULL when not allowed).
    `SUPPORT_SQL` defines the DuckDB macros `sg_*` (escaping, dynamic struct, JSON typing,
-   IRI check, Split). `CExpr` = SQL text + type + optional compile-time constant.
+   IRI check, Split). `CExpr` = SQL text + type + optional compile-time constant. An RDF 1.2
+   triple term (`afn:triple`, `functions.py`) is a dynamic term of kind 3 whose value is its
+   N-Triples form `<<( s p o )>>`.
    Never name a module `types.py` (shadows the stdlib when run from the package dir).
 5. **`expressions.py`** – SPARQL expressions → SQL (`compile_expr`). Error = NULL, with the
    SPARQL exceptions (BOUND, COALESCE, IF, &&, ||, !). Operator mapping decided on static
@@ -68,7 +70,10 @@ query text ──lexer.py──▶ tokens ──parser.py──▶ ast.Query
    (`Engine.stream_messages`, `stream_seconds`), each message a batch.
 9. **`documents.py`** – `DocumentSet` / `Document`: the documentset (IRI → path | bytes |
    str, media type → IANA datatype), lookup of `BASE`-relative IRIs in `base_dir`,
-   optional network fetch (`allow_network`).
+   optional network fetch (`allow_network`). A local file is read decompressed according to
+   the extension of its name and transcoded to UTF-8 from UTF-16/UTF-32 with a byte order
+   mark (`decoded_path`: a temporary file, removed at exit), as the Java engine's
+   `DocumentStreams`.
 10. **`engine.py`** – `Engine`: DuckDB connection, support macros, UDF registry
     (`udf(name, fn, params, ret, key)`, `null_handling='special'`), Arrow registration,
     temp files, `__docs` table for in-memory documents, named-query loading, `debug` →

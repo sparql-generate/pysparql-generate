@@ -134,7 +134,17 @@ the numeric type promotion of XPath, exact decimals and Jena's lexical forms
 `iter:GeoJSON`, `iter:CBOR`, `iter:Split`, `iter:regex`, `iter:for`; functions
 `fun:JSONPath`, `fun:XPath`, `fun:CSSPath`, `fun:CBOR`, `fun:regex`,
 `fun:SplitAtPosition`, `fun:bnode`, `fun:HTMLtoXML`, `fun:dateTime`,
-`fun:camelCase`, `fun:titleCase`, `fun:prefixedIRI`.
+`fun:camelCase`, `fun:titleCase`, `fun:prefixedIRI`; RDF 1.2 triple terms
+(`afn:triple(s, p, o)`, `afn:isTriple`, `afn:subject`, `afn:predicate`, `afn:object` of
+Jena's function library), written `<<( s p o )>>` in N-Triples and N-Quads and matched by
+the `WHERE` clause of a query that reads them from a `FROM GENERATE`.
+`iter:CSV` with named columns binds the position of the row (from 0, across batches) after
+the last column, and matches the names with the header ignoring case, as the Java engine
+2.5.0 does. Local documents are read decompressed according to the extension of their name
+(`.gz`, `.bz2`, `.xz`; the first file of a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2` or
+`.tar.xz` archive) and transcoded to UTF-8 from UTF-16 or UTF-32 with a byte order mark.
+A quad pattern whose graph is Jena's name of the default graph
+(`GRAPH <urn:x-arq:DefaultGraphNode> { ... }`) generates triples of the default graph.
 Batched iterators (`iter:CSV(<doc>, n, ...)`, `iter:JSONSurfer(<doc>, path, n, ...)`)
 evaluate the rest of the query once per batch, as the Java engine does (modifiers and `LIST`
 apply per batch). HTTP: `fun:HTTPGet` (and `HTTPPost`, `HTTPPut`, `HTTPDelete`,
@@ -153,12 +163,16 @@ run time is evaluated iteratively, in `BIND`, `FILTER` and the binding clauses.
 
 ```sh
 pytest                                   # unit tests + the Java test cases (if ../sparql-generate is checked out)
-python scripts/conformance.py [-v]       # the 45 Java test cases, compared by graph isomorphism
+python scripts/conformance.py [-v]       # the 51 Java test cases, compared by graph or dataset isomorphism
 python scripts/bench.py --sizes 10000 100000 1000000   # against the Java CLI (JDK >= 17)
 ```
 
-All 45 test cases of the Java implementation pass (44 offline; `capital`
-fetches a document from the Web). Where the Java engine 2.2 diverged from the
+All 51 test cases of the Java implementation 2.5.0 pass (50 offline; `capital`
+fetches a document from the Web). On the queries that the RML translator
+[rml-to-sparql-generate](https://github.com/sparql-generate/rml-to-sparql-generate) 0.2.0
+writes for the RML test suites (rml-test-cases, rml-core and the modules rml-io, rml-fnml,
+rml-cc, rml-star, rml-lv), the output is the Java engine 2.5.0's, case by case, by RDF dataset
+isomorphism. Where the Java engine 2.2 diverged from the
 documented behaviour of the language, this implementation follows the documentation
 (these divergences are fixed in later Java releases):
 ill-formed triples are dropped, `VALUES` in `WHERE` works with input bindings,

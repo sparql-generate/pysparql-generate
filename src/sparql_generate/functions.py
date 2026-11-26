@@ -69,7 +69,7 @@ def resolve_doc_arg(ctx, e: CExpr) -> CExpr:
     engine = ctx.engine
 
     def udf(uri):
-        d = engine.document(uri)
+        d = engine.document(uri) if uri is not None else None
         return None if d is None else {"k": 2, "v": d.text(), "d": d.datatype}
 
     name = engine.udf("sg_source", udf, ["VARCHAR"], engine.ANY_TYPE, key=None)
@@ -323,8 +323,34 @@ def fun_titlecase(ctx, args):
     s = string_literal_lex(e)
     if s == "NULL":
         return NULL
-    name = ctx.engine.udf("sg_titlecase", lambda x: None if x is None else "".join(p[:1].upper() + p[1:].lower() for p in __import__("re").split(r"[^A-Za-z0-9]+", x) if p), ["VARCHAR"], "VARCHAR")
+    if e.is_const and e.const is not None and e.type.is_stringy:
+        return const_str(title_case(str(e.const)))
+    name = ctx.engine.udf("sg_titlecase", title_case, ["VARCHAR"], "VARCHAR")
     return CExpr(f"{name}({s})", STR_T)
+
+
+def title_case(s):
+    """``fun:titleCase``, as the Java engine: the characters that are neither letters, digits
+    nor white space removed, the first letter or digit of each word in upper case, the other
+    characters kept, a run of white space after a word replaced by one space."""
+    if s is None:
+        return None
+    out = []
+    first_space, convert_next = False, True
+    for ch in s:
+        if ch in " \t\n\x0b\x0c\r\x1c\x1d\x1e\x1f" or (ch.isspace() and ch not in "\xa0\u2007\u202f"):
+            if first_space:
+                out.append(" ")
+                first_space, convert_next = False, True
+        elif not ch.isalnum():
+            pass
+        elif convert_next:
+            out.append(ch.upper())
+            convert_next, first_space = False, True
+        else:
+            out.append(ch)
+            first_space = True
+    return "".join(out)
 
 
 @register("mixedCase")
@@ -389,3 +415,92 @@ def fun_property(ctx, args):
 
     name = ctx.engine.udf("sg_property", lambda k: None if k is None else os.environ.get(k), ["VARCHAR"], "VARCHAR")
     return CExpr(f"{name}({s})", STR_T)
+
+
+# -- RDF 1.2 triple terms (Jena's afn:triple, afn:isTriple, afn:subject, afn:predicate, afn:object)
+
+AFN = "http://jena.apache.org/ARQ/function#"
+
+
+def afn_triple(ctx, args):
+    """``afn:triple(s, p, o)``: the triple term ``<<( s p o )>>``, a dynamic term of kind 3
+    whose value is its N-Triples form (Jena 5, RDF 1.2); unbound when ``p`` is not an IRI or
+    an argument is unbound (as Jena, a literal subject is accepted)."""
+    from .termtypes import to_nt
+
+    if len(args) != 3:
+        raise ValueError("afn:triple takes three arguments")
+    s, p, o = (to_nt(a, pos) for a, pos in zip(args, "opo"))  # Jena accepts a literal subject
+    if "NULL" in (s, p, o):
+        return NULL
+    return CExpr(f"sg_any(3, '<<( ' || {s} || ' ' || {p} || ' ' || {o} || ' )>>', NULL)", ANY_T)
+
+
+def afn_is_triple(ctx, args):
+    (e,) = args
+    if e.type.kind != "any":
+        return CExpr(f"CASE WHEN {e.sql} IS NULL THEN NULL ELSE FALSE END", TType("bool")) if not e.is_const \
+            else (NULL if e.is_null else const_bool(False))
+    return CExpr(f"(({e.sql}).k = 3)", TType("bool"))
+
+
+def _triple_part(i: int):
+    def compile_(ctx, args):
+        (e,) = args
+        if e.type.kind != "any":
+            return NULL
+        name = ctx.engine.udf("sg_triple_part", _triple_part_udf, ["VARCHAR", "INTEGER"], "VARCHAR")
+        return CExpr(f"sg_nt_any({name}(CASE WHEN ({e.sql}).k = 3 THEN ({e.sql}).v END, {i}))", ANY_T)
+
+    return compile_
+
+
+def triple_parts(nt: str):
+    """The three terms (N-Triples) of the N-Triples form of a triple term ``<<( s p o )>>``."""
+    import re
+
+    body = nt.strip()
+    if not (body.startswith("<<(") and body.endswith(")>>")):
+        return None
+    body = body[3:-3].strip()
+    parts, i = [], 0
+    token = re.compile(r'<[^>]*>|_:\S+|"(?:[^"\\]|\\.)*"(?:@[A-Za-z0-9-]+|\^\^<[^>]*>)?')
+    while i < len(body):
+        if body[i].isspace():
+            i += 1
+            continue
+        if body.startswith("<<(", i):
+            depth, j = 0, i
+            while j < len(body):
+                if body.startswith("<<(", j):
+                    depth, j = depth + 1, j + 3
+                elif body.startswith(")>>", j):
+                    depth, j = depth - 1, j + 3
+                    if depth == 0:
+                        break
+                else:
+                    m = token.match(body, j)
+                    j = m.end() if m else j + 1
+            parts.append(body[i:j])
+            i = j
+            continue
+        m = token.match(body, i)
+        if not m:
+            return None
+        parts.append(m.group(0))
+        i = m.end()
+    return parts if len(parts) == 3 else None
+
+
+def _triple_part_udf(nt, i):
+    if nt is None:
+        return None
+    parts = triple_parts(nt)
+    return parts[i] if parts else None
+
+
+FUNCTIONS[AFN + "triple"] = afn_triple
+FUNCTIONS[AFN + "isTriple"] = afn_is_triple
+FUNCTIONS[AFN + "subject"] = _triple_part(0)
+FUNCTIONS[AFN + "predicate"] = _triple_part(1)
+FUNCTIONS[AFN + "object"] = _triple_part(2)

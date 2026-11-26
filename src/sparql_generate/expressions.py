@@ -145,7 +145,9 @@ def _str(e: CExpr) -> CExpr:
     if e.is_const and e.type.kind == "bool":
         return const_str("true" if e.const else "false")
     if e.type.kind == "any":
-        return CExpr(f"CASE WHEN ({e.sql}).k <> 1 THEN ({e.sql}).v END", STR_T)
+        # a triple term: Jena's string "<< s p o >>" (the terms in N-Triples)
+        return CExpr(f"CASE WHEN ({e.sql}).k IN (0, 2) THEN ({e.sql}).v WHEN ({e.sql}).k = 3 THEN "
+                     f"'<< ' || substr(({e.sql}).v, 5, length(({e.sql}).v) - 8) || ' >>' END", STR_T)
     return CExpr(lex(e), STR_T)
 
 
@@ -947,7 +949,8 @@ def _string_function(name: str, args: List[CExpr]) -> CExpr:
             return NULL
         flags = "'g'"
         if len(args) == 4:
-            flags = f"('g' || {s[3]})"
+            f = _regex_flags(args[3], s[3])
+            flags = sql_string("g" + f) if f is not None else f"('g' || {s[3]})"
         pat = _xpath_regex(s[1])
         rep = _xpath_replacement(s[2])
         t = args[0].type if args[0].type.kind in ("str", "lang") else STR_T
@@ -957,9 +960,21 @@ def _string_function(name: str, args: List[CExpr]) -> CExpr:
             return NULL
         pat = _xpath_regex(s[1])
         if len(args) == 3:
-            return CExpr(f"regexp_matches({s[0]}, {pat}, {s[2]})", BOOL_T)
+            f = _regex_flags(args[2], s[2])
+            opts = sql_string(f) if f is not None else s[2]
+            return CExpr(f"regexp_matches({s[0]}, {pat}, {opts})", BOOL_T)
         return CExpr(f"regexp_matches({s[0]}, {pat})", BOOL_T)
     raise CompileError(name)
+
+
+def _regex_flags(arg: CExpr, sql: str):
+    """The DuckDB options of constant XPath regular-expression flags, or None for flags
+    known only at run time (passed as they are).  The flag ``q`` (the pattern is a literal
+    string) is RE2's ``l``; as in Jena, the replacement keeps its ``$n`` and ``\\``
+    escapes; the other flags are passed as they are."""
+    if not arg.is_const or arg.const is None:
+        return None
+    return str(arg.const).replace("q", "l")
 
 
 def _xpath_regex(pat_sql: str) -> str:
@@ -967,12 +982,34 @@ def _xpath_regex(pat_sql: str) -> str:
 
 
 def _xpath_replacement(rep_sql: str) -> str:
-    """XPath replacement strings use ``$1``; RE2 uses ``\\1``."""
+    """A replacement string of ``REPLACE`` (Java's ``Matcher.replaceAll``, as Jena: ``$n``
+    the n-th group, ``\\c`` the character ``c``) as an RE2 one (``\\n`` the n-th group,
+    ``\\\\`` a backslash)."""
     if rep_sql.startswith("'") and rep_sql.endswith("'"):
-        s = rep_sql[1:-1].replace("''", "'")
-        s2 = re.sub(r"\$(\d)", r"\\\1", s)
-        return sql_string(s2)
-    return f"regexp_replace({rep_sql}, '\\$([0-9])', '\\\\\\1', 'g')"
+        return sql_string(java_replacement_to_re2(rep_sql[1:-1].replace("''", "'")))
+    # at run time: escaped backslashes and dollars set aside (\x01, \x02), the other escapes
+    # removed, the groups renamed, then the literal backslashes and dollars put back
+    r = f"replace(replace({rep_sql}, '\\\\', chr(1)), '\\$', chr(2))"
+    r = f"regexp_replace({r}, '\\\\(.)', '\\1', 'g')"
+    r = f"regexp_replace({r}, '\\$([0-9])', '\\\\\\1', 'g')"
+    return f"replace(replace({r}, chr(1), '\\\\'), chr(2), '$')"
+
+
+def java_replacement_to_re2(s: str) -> str:
+    out = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and i + 1 < len(s):
+            out.append("\\\\" if s[i + 1] == "\\" else s[i + 1])
+            i += 2
+        elif c == "$" and i + 1 < len(s) and s[i + 1].isdigit():
+            out.append("\\" + s[i + 1])
+            i += 2
+        else:
+            out.append("\\\\" if c == "\\" else c)
+            i += 1
+    return "".join(out)
 
 
 _INT_RE = "^[+-]?[0-9]+$"

@@ -16,8 +16,10 @@ int    BIGINT             xsd:integer
 double DOUBLE             xsd:double
 bool   BOOLEAN            xsd:boolean
 json   JSON               a JSON value: string, number, boolean, object, array
-any    STRUCT(k,v,d)      dynamic: k=0 IRI, 1 blank node, 2 literal; v lexical;
-                          d datatype IRI, or '@lang' for language tags, or NULL
+any    STRUCT(k,v,d)      dynamic: k=0 IRI, 1 blank node, 2 literal, 3 triple term
+                          (RDF 1.2); v lexical (a triple term: its N-Triples form
+                          ``<<( s p o )>>``); d datatype IRI, or '@lang' for
+                          language tags, or NULL
 ====== ================== ==============================================
 
 ``NULL`` always means *unbound* (or an evaluation error).
@@ -378,6 +380,7 @@ CREATE OR REPLACE MACRO sg_any_nt(x, pos) AS CASE
     WHEN x.k = 0 THEN '<' || x.v || '>'
     WHEN pos = 'p' THEN NULL
     WHEN x.k = 1 THEN '_:' || x.v
+    WHEN x.k = 3 THEN x.v
     WHEN pos <> 'o' THEN NULL
     WHEN x.d IS NULL THEN sg_q(x.v)
     WHEN x.d LIKE '@%' THEN sg_q(x.v) || x.d
@@ -386,6 +389,7 @@ CREATE OR REPLACE MACRO sg_nt_lq(x) AS length(x) - strpos(reverse(x), '"') + 1;
 CREATE OR REPLACE MACRO sg_nt_dt(sfx) AS CASE WHEN sfx = '' THEN NULL WHEN starts_with(sfx, '@') THEN sfx
     WHEN sfx = '^^<{A.XSD_STRING}>' THEN NULL ELSE substr(sfx, 4, length(sfx) - 4) END;
 CREATE OR REPLACE MACRO sg_nt_any(x) AS CASE WHEN x IS NULL THEN NULL
+    WHEN starts_with(x, '<<') THEN sg_any(3, x, NULL)
     WHEN starts_with(x, '<') THEN sg_any(0, substr(x, 2, length(x) - 2), NULL)
     WHEN starts_with(x, '_:') THEN sg_any(1, substr(x, 3), NULL)
     ELSE sg_any(2, json_extract_string(CAST(substr(x, 1, sg_nt_lq(x)) AS JSON), '$'), sg_nt_dt(substr(x, sg_nt_lq(x) + 1))) END;

@@ -1,0 +1,24 @@
+BASE <http://ex.org/data/>
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+PREFIX fun: <http://w3id.org/sparql-generate/fn/>
+# Local documents are read decompressed according to the extension of their name
+# (.gz, .bz2, .xz; the first file of a .zip, .tar, .tar.gz, .tar.bz2, .tar.xz archive)
+# and transcoded to UTF-8 from UTF-16 or UTF-32 with a byte order mark
+GENERATE {
+  GENERATE { ?p ex:name ?name ; ex:from ?f . }
+  ITERATOR iter:CSV(?doc, "id", "name") AS ?id ?name
+  WHERE { BIND(IRI(CONCAT("http://ex.org/p/", ?id)) AS ?p) } .
+  GENERATE { ?p ex:jname ?name ; ex:from ?f . }
+  ITERATOR iter:JSONPath(?jdoc, "$[*]", "$.id", "$.name") AS ?e ?id ?name
+  WHERE { BIND(IRI(CONCAT("http://ex.org/j/", STR(?id))) AS ?p) } .
+  GENERATE { ex:constant ex:csv ?cn ; ex:json ?jn ; ex:xz ?xn . }
+  ITERATOR iter:CSV(<p.csv.tar.gz>, "name") AS ?cn
+  ITERATOR iter:JSONPath(<p32le.json>, "$[*]", "$.name") AS ?je ?jn
+  ITERATOR iter:CSV(<p16le.csv.gz>) AS ?xi ?xn .
+}
+ITERATOR iter:Split("p.csv.gz p.csv.bz2 p.csv.xz p.csv.zip p.csv.tar p.csv.tar.gz p.csv.tar.bz2 p.csv.tar.xz p16le.csv p16be.csv p8bom.csv p16le.csv.gz p.json.gz p32le.json", " ") AS ?f
+WHERE {
+  BIND(IF(CONTAINS(?f, ".json"), ?none, IRI(?f)) AS ?doc)
+  BIND(IF(CONTAINS(?f, ".json"), IRI(?f), ?none) AS ?jdoc)
+}

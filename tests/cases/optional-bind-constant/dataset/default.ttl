@@ -1,0 +1,4 @@
+@prefix ex: <http://example.com/> .
+ex:p1 ex:name "alice" . ex:p2 ex:name "bob" .
+<http://example.com/person/alice> ex:age 30 ; ex:tag "t-alice" .
+<http://example.com/person/bob> ex:age 40 .

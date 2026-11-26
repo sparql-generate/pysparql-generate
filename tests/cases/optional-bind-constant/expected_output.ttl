@@ -1,0 +1,4 @@
+<http://example.com/p1> <http://example.com/t> "yes" .
+<http://example.com/p1> <http://example.com/u> "yes" .
+<http://example.com/p1> <http://example.com/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+<http://example.com/p2> <http://example.com/age> "40"^^<http://www.w3.org/2001/XMLSchema#integer> .
