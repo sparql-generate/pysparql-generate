@@ -234,6 +234,13 @@ def test_cli_fails(tmp_path, args):
     assert "Traceback" not in r.stderr
 
 
+def test_cli_error_leaves_an_empty_output_file(tmp_path):
+    # as the Java command line, which opens its output file before the execution
+    (tmp_path / "out.nt").write_text("old\n")
+    r = run_cli(tmp_path, RAISE, "-o", "out.nt")
+    assert r.returncode == 1 and (tmp_path / "out.nt").read_text() == ""
+
+
 def test_cli_select_and_template_fail(tmp_path):
     r = run_cli(tmp_path, 'SELECT ?y WHERE { BIND(RAISE("select") AS ?y) }')
     assert r.returncode == 1 and "select" in r.stderr

@@ -143,6 +143,14 @@ def main(argv=None) -> int:
         print("syntax OK")
         return 0
 
+    if args.output and not args.append_output:
+        # the output file exists, empty, before the execution, as the Java command line opens it:
+        # an error that stops the execution (RAISE, iter:SQL) leaves it empty, not absent
+        out0 = args.output if os.path.isabs(args.output) or not args.dir else os.path.join(args.dir, args.output)
+        try:
+            open(out0, "w").close()
+        except OSError:
+            pass
     try:
         ex = Execution(query_text, base=base, documents=documents, base_dir=dir_, named_queries=named or None,
                        dataset=dataset, bindings=bindings, conf=conf, allow_network=not args.no_network,
