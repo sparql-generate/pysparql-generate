@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (2026-11-27)
+
+A correction of `iter:CSV` on a document computed from the solution, and a missing dependency.
 
 - `iter:CSV` on a document that depends on the solution (an IRI template such as
   `<T-{?feed}.csv>`, under an outer iteration): each call reads its own named columns. The

@@ -4,7 +4,7 @@ title: "pysparql-generate"
 abstract: "An implementation of SPARQL-Generate with a Python API, compiled to a columnar engine (DuckDB): generate RDF or text from CSV, JSON, XML, HTML and RDF."
 type: software
 license: Apache-2.0
-version: "0.4.0"
+version: "0.4.1"
 date-released: "2026-11-27"
 doi: "10.5281/zenodo.24441877"
 identifiers:
