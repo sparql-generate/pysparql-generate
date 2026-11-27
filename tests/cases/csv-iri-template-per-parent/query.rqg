@@ -1,0 +1,18 @@
+PREFIX ex: <http://ex.org/>
+PREFIX iter: <http://w3id.org/sparql-generate/iter/>
+# Under an iteration of FEEDS.csv, several iter:CSV whose document is an IRI template on the
+# feed (a per-row source): each one reads its own named columns, by name, in the header of
+# each file (the order of the columns differs between the files), then the position of the
+# row; without names, the columns in their order. The base (sparql-generate-conf.json) maps
+# the IRIs to the files of the folder.
+GENERATE {
+  GENERATE { <http://ex.org/{?feed}/{?k}> ex:v ?v . }
+  ITERATOR iter:CSV(<U-{?feed}.csv>, "k", "v") AS ?k ?v .
+  GENERATE { <http://ex.org/{?feed}/{?id}> ex:a ?a ; ex:b ?b ; ex:c ?c ; ex:pos ?pos . }
+  ITERATOR iter:CSV(<T-{?feed}.csv>, "id", "a", "b", "c") AS ?id ?a ?b ?c ?pos .
+  GENERATE { <http://ex.org/{?feed}/{?id2}> ex:missing ?d ; ex:b2 ?b2 . }
+  ITERATOR iter:CSV(<T-{?feed}.csv>, "id", "d", "b") AS ?id2 ?d ?b2 .
+  GENERATE { <http://ex.org/{?feed}/first/{?c0}> ex:second ?c1 . }
+  ITERATOR iter:CSV(<T-{?feed}.csv>) AS ?c0 ?c1 ?c2 .
+}
+ITERATOR iter:CSV(<FEEDS.csv>, "feed") AS ?feed

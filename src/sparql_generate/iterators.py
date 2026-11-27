@@ -216,7 +216,10 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
     cols = [(f"c{i}", STR_T) for i in range(n)]
     if names:
         cols.append((f"c{n}", INT_T))  # the position of the row, after the named columns
-    name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols))
+    # one UDF per dialect and selection of columns: the closure reads them, and so does the
+    # struct type of its result
+    key = (header, quote, delim, tuple(names) if names else None, n)
+    name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols), key=key)
     return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True)
 
 
