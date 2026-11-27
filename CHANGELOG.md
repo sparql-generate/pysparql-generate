@@ -5,7 +5,9 @@
 - `iter:CSV` on a document computed per row (a variable, an IRI template) is read about
   three times faster: the rows of a vector of documents are returned to DuckDB as Arrow
   arrays built column by column, instead of a Python dict per row (gtfs-feeds, 100 feeds:
-  70 s to 25 s before the output is written). Same bindings.
+  70 s to 25 s before the output is written). Same bindings. The reader receives the IRI of
+  the document, not its text: a vector of large documents passed as text exceeded the 2 GB
+  of an Arrow string buffer (1,000 feeds).
 
 ## 0.4.1 (2026-11-27)
 

@@ -82,7 +82,11 @@ def _const_text(e: CExpr) -> Optional[str]:
 
 @register("CSV")
 def iter_csv(ctx, args: List[CExpr], nvars: int) -> IterPlan:
-    args = [resolve_doc_arg(ctx, args[0])] + list(args[1:]) if args else args
+    # the IRI of a document computed per row is passed to the reader, which looks the
+    # document up itself: its text would go through DuckDB (a vector of large documents
+    # exceeds the 2 GB of an Arrow string buffer)
+    by_iri = bool(args) and args[0].type.kind == "iri" and not args[0].is_const
+    args = [args[0] if by_iri else resolve_doc_arg(ctx, args[0])] + list(args[1:]) if args else args
     if not args:
         raise IteratorError("iter:CSV needs at least the CSV document")
     doc, rest = args[0], list(args[1:])
@@ -105,9 +109,9 @@ def iter_csv(ctx, args: List[CExpr], nvars: int) -> IterPlan:
         if not _all_const(rest):
             raise IteratorError("iter:CSV: column names must be constants")
         names = [str(r.const) for r in rest]
-    text = _const_text(doc)
-    if text is None and not doc.is_const:
-        plan = _csv_unnest(ctx, doc, header, quote, delim, names, nvars)
+    text = None if by_iri else _const_text(doc)
+    if by_iri or (text is None and not doc.is_const):
+        plan = _csv_unnest(ctx, doc, header, quote, delim, names, nvars, by_iri)
         plan.batch = batch
         return plan
     d = _doc_of(doc)
@@ -185,7 +189,8 @@ def _csv_python_table(ctx, path: str, header: bool, quote: str, delim: str) -> s
     return ctx.engine.register_arrow(pa.table(data))
 
 
-def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nvars: int) -> IterPlan:
+def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nvars: int,
+                by_iri: bool = False) -> IterPlan:
     """``iter:CSV`` on a document computed per row: a vectorised UDF (Arrow in, Arrow out)
     that reads each document with Python's csv module and returns the list of its rows as
     structs, built column by column (dicts per row and DuckDB's conversion of Python values
@@ -223,7 +228,10 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
     def udf(texts):
         offsets, parts, nulls = [0], [], []
         for text in texts.to_pylist():
-            if text is not None and text.startswith("\x00"):
+            if by_iri:  # the IRI of the document (rule SOURCE: a missing document is unbound)
+                d = engine.document(text) if text is not None else None
+                text = None if d is None else d.text()
+            elif text is not None and text.startswith("\x00"):
                 text = engine.documents_by_uri[text[1:]].text()
             if text is None:
                 offsets.append(offsets[-1])
@@ -238,9 +246,10 @@ def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nv
 
     # one UDF per dialect and selection of columns: the closure reads them, and so does the
     # struct type of its result
-    key = (header, quote, delim, tuple(names) if names else None, n)
+    key = (header, quote, delim, tuple(names) if names else None, n, by_iri)
     name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols), key=key, arrow=True)
-    return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True)
+    arg = doc.sql if by_iri else doc_lookup_sql(ctx, doc)
+    return IterPlan("unnest", f"{name}({arg})", cols, struct=True)
 
 
 # -- CSVStrict (the Java engine 2.6.1) ----------------------------------------------------
