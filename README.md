@@ -29,6 +29,7 @@ ITERATOR iter:CSV(<http://example.org/stops.csv>, "id", "name", "lat", "tags") A
 ```sh
 pip install -e .            # Python 3.11+; pulls duckdb, pyarrow, rdflib, lxml, jsonpath-ng, cbor2
 pip install -e '.[test]'    # + pytest
+pip install -e '.[sql]'     # iter:SQL on PostgreSQL (psycopg2), MySQL (PyMySQL), SQL Server (pyodbc + Microsoft's ODBC driver)
 ```
 
 ## Python API
@@ -220,7 +221,15 @@ apply per batch). HTTP: `fun:HTTPGet` (and `HTTPPost`, `HTTPPut`, `HTTPDelete`,
 `fun:HTTPExtractBody`, `fun:HTTPExtractHeader` and `fun:HTTPExtractResponseCode` read it;
 `iter:HTTPGet(<iri>, seconds, calls)` binds each response, typed with its media type, as
 a batch of its own (a call count is required: an endless stream is refused). SQL:
-`iter:SQL(<jdbc:sqlite:path>, query)` or `<jdbc:duckdb:path>`. Streams:
+`iter:SQL(database, query, "column"...)` reads a relational database as R2RML does, as the
+Java engine 2.6.1: the JDBC URL of PostgreSQL, MySQL, SQL Server, SQLite or DuckDB (an IRI or
+a string, with the user and the password in it), the named columns (exactly, else ignoring
+case), each cell its natural RDF literal in canonical form, `NULL` unbound; an unknown
+column or a query that the database rejects stops the execution, an unreachable database
+is a missing document. `iter:CSVStrict` reads the CSV of RML-IO (an empty cell is the empty
+string, a row of the wrong length an error), `iter:SPARQL` the solutions of a SELECT query
+on an RDF document, `fun:unsafeIRI` makes an IRI of a string unchecked (white space allowed).
+Streams:
 `iter:WebSocket(<ws://...>, [first message])` and `iter:MQTTSubscribe(<tcp://...>, topic...)`
 never end in the Java engine; here a bounded prefix is read at compile time, at most
 `stream_messages` messages for at most `stream_seconds` seconds (`--stream-messages`,
@@ -231,29 +240,29 @@ run time is evaluated iteratively, in `BIND`, `FILTER` and the binding clauses.
 
 ```sh
 pytest                                   # unit tests + the Java test cases (if ../sparql-generate is checked out)
-python scripts/conformance.py [-v]       # the 53 Java test cases, compared by graph or dataset isomorphism
+python scripts/conformance.py [-v]       # the Java test cases, compared by graph or dataset isomorphism, or by text
 python scripts/bench.py --sizes 10000 100000 1000000   # against the Java CLI (JDK >= 17)
 ```
 
-All 53 test cases of the Java implementation 2.6.0 pass (52 offline; `capital`
-fetches a document from the Web; `raise-data-error` expects the message of a `RAISE`).
-On the queries that the RML translator
-[rml-to-sparql-generate](https://github.com/sparql-generate/rml-to-sparql-generate) 0.3.0
+All 58 test cases of the Java implementation 2.6.1 pass but one, offline (`capital` fetches
+a document from the Web). On the queries that the RML translator
+[rml-to-sparql-generate](https://github.com/sparql-generate/rml-to-sparql-generate) 0.4.0
 writes for the RML test suites, run by the conformance harness of
 [kgc-bench](https://github.com/sparql-generate/kgc-bench) (`--graphs-to-files` or
-`--targets` for the logical targets of RML-IO), every case has the status of the Java engine
-2.6.0, and its output and target files are the Java engine's, by RDF dataset isomorphism
-(where an error stops the execution, the Java engine leaves an empty output file, this
-implementation none):
+`--targets` for the logical targets of RML-IO; the SQL tracks on PostgreSQL, MySQL and SQL
+Server servers), every case has the status of the Java engine 2.6.1:
 
 | suite | cases | PASS | FAIL |
 |---|---|---|---|
-| RMLio/rml-test-cases@803dd3ec (CSV, JSON, XML) | 117 | 115 | 2 |
-| kg-construct/rml-core@82ab28d4 | 76 | 75 | 1 |
-| kg-construct/rml-io@0cb26a2 | 73 | 64 | 9 |
+| RMLio/rml-test-cases@803dd3ec (CSV, JSON, XML) | 117 | 117 | 0 |
+| RMLio/rml-test-cases@803dd3ec (PostgreSQL) | 60 | 57 | 3 |
+| RMLio/rml-test-cases@803dd3ec (MySQL) | 60 | 59 | 1 |
+| RMLio/rml-test-cases@803dd3ec (SQL Server) | 60 | 58 | 2 |
+| kg-construct/rml-core@82ab28d4 | 76 | 76 | 0 |
+| kg-construct/rml-io@0cb26a2 | 73 | 72 | 1 |
 | kg-construct/rml-fnml@f573f79 | 22 | 22 | 0 |
 | kg-construct/rml-cc@d97fddf | 35 | 35 | 0 |
-| kg-construct/rml-lv@94beb94 | 41 | 40 | 1 |
+| kg-construct/rml-lv@94beb94 | 41 | 41 | 0 |
 | kg-construct/rml-star@711f72e | 18 | 18 | 0 |
 
 The translated GTFS-Madrid-Bench mapping gives the Java engine's set of triples (395,953 at

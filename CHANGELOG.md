@@ -1,9 +1,8 @@
 # Changelog
 
-## Unreleased (branch `next`)
+## 0.4.0 (2026-11-27)
 
-Parity with the Java engine 2.6.1 (branch `fix-2.6.1`) and the RML translator
-rml-to-sparql-generate `next`.
+Parity with the Java engine 2.6.1 and the RML translator rml-to-sparql-generate 0.4.0.
 
 - `iter:SQL` reads relational databases as R2RML does, as the Java engine 2.6.1: the
   database is a JDBC URL, an IRI or a string, of PostgreSQL (psycopg2), MySQL (PyMySQL, with
@@ -32,6 +31,13 @@ rml-to-sparql-generate `next`.
   its call in their order.
 - The body of a `FUNCTION` resolves relative IRIs against the base of the function, its
   arguments against the base of the caller.
+- `iter:JSONPath`: an auxiliary query is read as the Java engine reads it (a definite path
+  gives its value; an indefinite one `[]` when nothing matches, its first match when a
+  scalar, nothing when an object or an array); several auxiliary queries with wildcards no
+  longer fail.
+- `iter:XPath`: the prefixes that the document declares may be used in the expressions.
+- The command line creates its output file, empty, before the execution, as the Java command
+  line does: an error that stops the execution leaves an empty file.
 - `scripts/conformance.py` compares a `TEMPLATE` case with `expected_output.txt`.
 
 ## 0.3.0 (2026-11-26)
