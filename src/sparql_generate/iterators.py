@@ -186,40 +186,60 @@ def _csv_python_table(ctx, path: str, header: bool, quote: str, delim: str) -> s
 
 
 def _csv_unnest(ctx, doc: CExpr, header: bool, quote: str, delim: str, names, nvars: int) -> IterPlan:
+    """``iter:CSV`` on a document computed per row: a vectorised UDF (Arrow in, Arrow out)
+    that reads each document with Python's csv module and returns the list of its rows as
+    structs, built column by column (dicts per row and DuckDB's conversion of Python values
+    took about four times longer, a third of the time of the gtfs-feeds workload). Large
+    strings and lists: a vector of documents may hold more than 2 GB of text."""
     import csv
     import io
 
+    import pyarrow as pa
+
     engine = ctx.engine
     n = len(names) if names else nvars
+    cols = [(f"c{i}", STR_T) for i in range(n)]
+    if names:
+        cols.append((f"c{n}", INT_T))  # the position of the row, after the named columns
+    fields = [pa.field(f"c{i}", pa.large_string()) for i in range(n)] + ([pa.field(f"c{n}", pa.int64())] if names else [])
+    row_type = pa.struct(fields)
 
-    def udf(text):
-        text = text if text is None or not text.startswith("\x00") else engine.documents_by_uri[text[1:]].text()
-        if text is None:
-            return None
+    def rows_of(text):
+        """The struct array of the rows of one document."""
         rows = list(csv.reader(io.StringIO(text), delimiter=delim, quotechar=quote))
-        if not rows:
-            return []
-        if header:
+        if header and rows:
             hdr = rows[0]
             rows = rows[1:]
             idx = [header_index(hdr, nm) for nm in names] if names else list(range(n))
         else:
             idx = list(range(n))
-        out = []
-        for k, r in enumerate(rows):
-            row = {f"c{i}": (r[j] if j is not None and j < len(r) and r[j] != "" else None) for i, j in enumerate(idx)}
-            if names:
-                row[f"c{n}"] = k
-            out.append(row)
-        return out
+        arrays = [pa.array([None] * len(rows), pa.large_string()) if j is None else
+                  pa.array([r[j] if j < len(r) and r[j] != "" else None for r in rows], pa.large_string())
+                  for j in idx]
+        if names:
+            arrays.append(pa.array(range(len(rows)), pa.int64()))
+        return pa.StructArray.from_arrays(arrays, fields=fields) if rows else pa.array([], row_type)
 
-    cols = [(f"c{i}", STR_T) for i in range(n)]
-    if names:
-        cols.append((f"c{n}", INT_T))  # the position of the row, after the named columns
+    def udf(texts):
+        offsets, parts, nulls = [0], [], []
+        for text in texts.to_pylist():
+            if text is not None and text.startswith("\x00"):
+                text = engine.documents_by_uri[text[1:]].text()
+            if text is None:
+                offsets.append(offsets[-1])
+                nulls.append(True)
+                continue
+            part = rows_of(text)
+            parts.append(part)
+            offsets.append(offsets[-1] + len(part))
+            nulls.append(False)
+        values = pa.concat_arrays(parts) if parts else pa.array([], row_type)
+        return pa.LargeListArray.from_arrays(pa.array(offsets, pa.int64()), values, mask=pa.array(nulls, pa.bool_()))
+
     # one UDF per dialect and selection of columns: the closure reads them, and so does the
     # struct type of its result
     key = (header, quote, delim, tuple(names) if names else None, n)
-    name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols), key=key)
+    name = engine.udf("sg_csv", udf, ["VARCHAR"], engine.list_struct_type(cols), key=key, arrow=True)
     return IterPlan("unnest", f"{name}({doc_lookup_sql(ctx, doc)})", cols, struct=True)
 
 

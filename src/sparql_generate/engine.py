@@ -101,9 +101,10 @@ class Engine:
         return [(r[0], r[1]) for r in rows]
 
     # -- UDFs ----------------------------------------------------------------------
-    def udf(self, name: str, fn: Callable, params: List, ret, key=None) -> str:
+    def udf(self, name: str, fn: Callable, params: List, ret, key=None, arrow: bool = False) -> str:
         """Register ``fn`` once under ``name`` (``key`` distinguishes closures with
-        different captured parameters) and return the SQL function name."""
+        different captured parameters) and return the SQL function name. ``arrow``: ``fn``
+        takes and returns Arrow arrays, a vector of rows at a time (DuckDB's ``type='arrow'``)."""
         k = (name, key)
         if k in self._udfs:
             return self._udfs[k]
@@ -112,7 +113,8 @@ class Engine:
             sqlname = self.fresh(name + "_")
         ptypes = [p if not isinstance(p, str) else duckdb.sqltype(p) for p in params]
         rtype = ret if not isinstance(ret, str) else duckdb.sqltype(ret)
-        self.con.create_function(sqlname, fn, ptypes, rtype, null_handling="special")
+        self.con.create_function(sqlname, fn, ptypes, rtype, null_handling="special",
+                                 **({"type": "arrow"} if arrow else {}))
         self._udfs[k] = sqlname
         return sqlname
 
