@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `iter:CSV` on a document that depends on the solution (an IRI template such as
+  `<T-{?feed}.csv>`, under an outer iteration): each call reads its own named columns. The
+  Python reader of these calls was registered once per execution, with the column names
+  and the dialect of the first such call, so that a later call with other names gave
+  unbound variables and the position of the row in the wrong variable, or failed
+  (`Binder Error: Could not find key "c2" in struct`) when it had more columns.
+- `cssselect` is a dependency: without it, `iter:CSSPath` and `fun:CSSPath` gave no result.
+
 ## 0.4.0 (2026-11-27)
 
 Parity with the Java engine 2.6.1 and the RML translator rml-to-sparql-generate 0.4.0.
