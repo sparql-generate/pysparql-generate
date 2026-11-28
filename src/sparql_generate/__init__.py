@@ -71,6 +71,8 @@ def load_conf(path: str) -> dict:
     return conf
 
 
+_NT = ("nt", "ntriples", "n-triples", "application/n-triples")
+
 class Execution:
     """Compile a query once and read its results.
 
@@ -101,7 +103,8 @@ class Execution:
                  bindings: Optional[List[Dict[str, object]]] = None, conf: Optional[dict] = None,
                  allow_network: bool = True, threads: Optional[int] = None, memory_limit: Optional[str] = None,
                  debug: bool = False, fail_on_missing: Optional[bool] = None,
-                 stream_messages: Optional[int] = None, stream_seconds: Optional[float] = None):
+                 stream_messages: Optional[int] = None, stream_seconds: Optional[float] = None,
+                 sequential: bool = False):
         if conf is not None:
             if fail_on_missing is None:
                 fail_on_missing = bool(conf.get("failOnMissing", False))
@@ -132,12 +135,14 @@ class Execution:
         # the quads of the named graphs left in the output by graphs_to_files(), or None
         self._named_sql: Optional[str] = None
         self._bindings = bindings
-        # sequential batches: the output of the query is the union of its outputs on the
-        # batches of its first iterator (union_of_batches), compiled and written one after
-        # another so that the memory is that of one batch. Only the first batch is compiled
-        # here; write() in N-Triples compiles and writes the next ones, any other output
-        # compiles the query again on all the batches at once (_unbatch)
-        self.compiler.sequential = not bindings and union_of_batches(self.query) and \
+        # sequential batches (on request: the command line, generate_to in N-Triples): when
+        # the output of the query is the union of its outputs on the batches of its first
+        # iterator (union_of_batches), they are compiled and written one step after another,
+        # so that the memory is that of one step. Only the first batch is compiled here;
+        # write() in N-Triples compiles and writes the next ones. Any other output compiles
+        # the query again on all the batches at once (_unbatch); ``plan`` is that of the
+        # current step (--explain shows the first one)
+        self.compiler.sequential = bool(sequential) and not bindings and union_of_batches(self.query) and \
             not ast.has_quad_patterns(self.query)
         self.plan: Plan = self.compiler.compile(self.query, bindings)
         self._sequential = (self.compiler.n_batches or 0) > 1
@@ -162,19 +167,22 @@ class Execution:
         self.plan.warnings[:0] = [w for w in warnings if w not in self.plan.warnings]
         self._sequential = False
 
-    def _next_batch(self) -> bool:
-        """Compile the next step of a sequential evaluation; False after the last one. After
-        the first batch, a step groups as many consecutive batches as fit in
-        ``Compiler.step_rows`` rows, from the rows that the first batch created."""
+    def _next_batch(self, lines: int = 0) -> bool:
+        """Compile the next step of a sequential evaluation; False after the last one. A step
+        groups as many consecutive batches as fit in ``Compiler.step_rows`` rows, from the
+        largest number of rows per batch seen so far (rows of the tables a step created, or
+        lines it wrote, ``lines``), at most twice as many batches as the previous step."""
         c = self.compiler
         n = c.n_batches or 0
         if c.batch_hi >= n:
             return False
-        if c.batch_lo == 0:
-            rows = self.engine.con.execute(
-                "SELECT table_name, estimated_size FROM duckdb_tables() WHERE temporary").fetchall()
-            created = sum(sz for name, sz in rows if name not in c.protected)
-            self._step = max(1, c.step_rows // max(1, created))
+        rows = self.engine.con.execute(
+            "SELECT table_name, estimated_size FROM duckdb_tables() WHERE temporary").fetchall()
+        created = sum(sz for name, sz in rows if name not in c.protected)
+        per_batch = max(created, lines) / max(1, c.batch_hi - c.batch_lo)
+        self._per_batch = max(getattr(self, "_per_batch", 0), per_batch)
+        prev = c.batch_hi - c.batch_lo
+        self._step = max(1, min(2 * prev, int(c.step_rows // max(1.0, self._per_batch))))
         warnings = self.plan.warnings
         self.engine.drop_temp_tables(c.protected)
         c.batch_lo, c.batch_hi = c.batch_hi, min(n, c.batch_hi + self._step)
@@ -351,7 +359,7 @@ class Execution:
         if format.lower() in QUAD_FORMATS:
             return self._write_quads(out, format.lower(), distinct)
         self._default_graph_only()
-        if format in ("nt", "ntriples", "n-triples", "application/n-triples"):
+        if format in _NT:
             if self._sequential and not self._written and not distinct and self._named_sql is None:
                 self._written = True
                 return self._write_sequential(out)
@@ -364,28 +372,61 @@ class Execution:
         return len(g)
 
     def _write_sequential(self, out) -> int:
-        """N-Triples, one batch after another (sequential batches): the first batch in the
-        output, each next one in a temporary file appended to it (a file of one batch, removed
-        at once, mostly never reaches the disk), or straight to a file that is not a regular
-        file (``/dev/null``) and to a stream."""
+        """N-Triples, one step after another (sequential batches). To a stream, each step in
+        turn. To a path, each step is copied into the destination, opened once, from a
+        temporary file of the same compression (gzip members and zstd frames concatenate);
+        a regular file is written under a temporary name and renamed at the end, so that an
+        error leaves it as it was; ``/dev/null`` takes each step directly."""
         import shutil
         import tempfile
 
-        n = self._write_nt(out, False)
-        path = os.fspath(out) if isinstance(out, (str, os.PathLike)) else None
-        direct = path is None or not os.path.isfile(path)
-        while self._next_batch():
-            if direct:
-                n += self._write_nt(out, False)
-                continue
-            fd, part = tempfile.mkstemp(prefix=".sparql_generate_", suffix=".nt", dir=os.path.dirname(os.path.abspath(path)))
+        if not isinstance(out, (str, os.PathLike)):
+            n = 0
+            while True:
+                k = self._write_nt(out, False)
+                n += k
+                if not self._next_batch(k):
+                    return n
+        path = os.fspath(out)
+        if os.path.abspath(path) == os.devnull:
+            n = 0
+            while True:
+                k = self._write_nt(path, False)
+                n += k
+                if not self._next_batch(k):
+                    return n
+        ext = next((e for e in (".gz", ".zst") if path.endswith(e)), "")
+        # /dev/stdout and /proc/self/fd/N may name a regular file (a redirection): written in
+        # place, never replaced
+        special = os.path.abspath(path).startswith(("/dev/", "/proc/"))
+        regular = not special and (not os.path.exists(path) or os.path.isfile(path))
+        if regular:
+            fd, dest = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".",
+                                        dir=os.path.dirname(os.path.abspath(path)))
             os.close(fd)
-            try:
-                n += self._write_nt(part, False)
-                with open(part, "rb") as src, open(path, "ab") as dst:
-                    shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
-            finally:
-                os.remove(part)
+        else:  # a FIFO, /dev/stdout: opened once, in append mode
+            dest = path
+        n = 0
+        try:
+            with open(dest, "wb" if regular else "ab") as dst:
+                while True:
+                    fd, part = tempfile.mkstemp(prefix="sparql_generate_", suffix=".nt" + ext)
+                    os.close(fd)
+                    try:
+                        k = self._write_nt(part, False)
+                        with open(part, "rb") as src:
+                            shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
+                    finally:
+                        os.remove(part)
+                    n += k
+                    if not self._next_batch(k):
+                        break
+            if regular:
+                os.replace(dest, path)
+        except BaseException:
+            if regular and os.path.exists(dest):
+                os.remove(dest)
+            raise
         return n
 
     def _write_nt(self, out, distinct: bool) -> int:
@@ -521,6 +562,7 @@ def to_dataset(query: Union[str, ast.Query], **kwargs):
 def generate_to(query: Union[str, ast.Query], out, *, format: str = "nt", distinct: bool = False, **kwargs) -> int:
     """Run a query and write its output to a path or file object (``format="nq"`` or
     ``"trig"`` for the named graphs of a query with GRAPH blocks)."""
+    kwargs.setdefault("sequential", format in _NT and not distinct)
     with Execution(query, **kwargs) as ex:
         return ex.write(out, format=format, distinct=distinct)
 

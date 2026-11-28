@@ -1790,14 +1790,43 @@ def tgroup_to_aggregate(g: A.TGroup) -> A.Aggregate:
     return A.Aggregate("GROUP_CONCAT", (expr,), g.distinct, g.separator if g.separator is not None else "")
 
 
+
+# the iterators whose batches may be evaluated one after another: documents read again from
+# the start are the same (never a stream, a web API, a database)
+SEQUENTIAL_ITERATORS = {A.SG_ITER + n for n in ("CSV", "CSVStrict", "JSONSurfer")}
+# functions whose value changes from one evaluation to the next: a WHERE group is evaluated
+# once per step, so a blank node or a random value of a sub-SELECT would differ between steps
+VOLATILE = {"BNODE", "UUID", "STRUUID", "RAND", "NOW"}
+
+
+def _calls(node, acc: set) -> set:
+    """The names of the functions called in an AST node, at any depth."""
+    import dataclasses
+
+    if isinstance(node, A.Call):
+        acc.add(node.name)
+    if dataclasses.is_dataclass(node) and not isinstance(node, type):
+        for f in dataclasses.fields(node):
+            _calls(getattr(node, f.name), acc)
+    elif isinstance(node, (list, tuple)):
+        for x in node:
+            _calls(x, acc)
+    return acc
+
+
 def union_of_batches(query: A.Query, root: bool = True) -> bool:
-    """True if the output of ``query`` on a list of solutions is the union of its outputs on
-    any partition of that list, so that the batches of its first iterator may be evaluated
-    one after another (the condition of the Java engine 2.6.2, ``RootPlan.isUnionOfBatches``):
-    a GENERATE query with a template, without DISTINCT, REDUCED, aggregate, GROUP BY, HAVING,
-    ORDER BY, LIMIT, OFFSET or LIST, whose sub-queries are such queries without dataset
-    clauses. Also excluded here: GRAPH blocks, named queries (a call, iter:call-select, a
-    named query as an iterator) and initial bindings (checked by the caller)."""
+    """True if the batches of the first iterator of ``query`` may be compiled and written one
+    after another: the output is the union of the outputs on any partition of the batches
+    (the condition of the Java engine 2.6.2, ``RootPlan.isUnionOfBatches``: a GENERATE query
+    with a template, without DISTINCT, REDUCED, aggregate, GROUP BY, HAVING, ORDER BY, LIMIT,
+    OFFSET or LIST, whose sub-queries are such queries without dataset clauses), and the
+    split saves memory. Also required here: no GRAPH block, no named query (a call,
+    iter:call-select, a named query as an iterator), no volatile function (BNODE(), UUID(),
+    STRUUID(), RAND(), NOW()) in a WHERE clause nor NOW() anywhere, a first iterator that
+    reads a document (iter:CSV, iter:CSVStrict, iter:JSONSurfer: never a stream), and a
+    sub-query in the template of the query (with a single level, DuckDB evaluates all the
+    batches at once with no more memory than one: a split only copies the iterator). Initial
+    bindings are checked by the caller."""
     if query.kind != "GENERATE" or query.generate_clause is None:
         return False
     if (query.distinct or query.reduced or query.group_by or query.having or query.order_by
@@ -1810,6 +1839,16 @@ def union_of_batches(query: A.Query, root: bool = True) -> bool:
             return False
         if isinstance(clause, A.IteratorClause) and clause.expr.name == CALL_SELECT:
             return False
+    if root:
+        first = query.binding_clauses[0] if query.binding_clauses else None
+        if not isinstance(first, A.IteratorClause) or first.expr.name not in SEQUENTIAL_ITERATORS:
+            return False
+        if "NOW" in _calls(query, set()):
+            return False
+        if not any(isinstance(el, A.SubQuery) for el in query.generate_clause):
+            return False
+    if _calls(query.where, set()) & VOLATILE:
+        return False
     if Compiler.collect_aggregates(None, query):
         return False
     for el in query.generate_clause:

@@ -15,7 +15,7 @@ import time
 
 import duckdb
 
-from . import (Execution, ParseError, CompileError, QUAD_FORMATS, QuadsNotSupported, RaiseError, TargetError,
+from . import (_NT, Execution, ParseError, CompileError, QUAD_FORMATS, QuadsNotSupported, RaiseError, TargetError,
                load_conf, __version__)
 from .ast import has_quad_patterns
 
@@ -156,7 +156,11 @@ def main(argv=None) -> int:
                        dataset=dataset, bindings=bindings, conf=conf, allow_network=not args.no_network,
                        threads=args.threads, memory_limit=args.memory_limit, debug=args.explain,
                        fail_on_missing=args.fail_on_missing, stream_messages=args.stream_messages,
-                       stream_seconds=args.stream_seconds)
+                       stream_seconds=args.stream_seconds,
+                       # N-Triples: the batches of the first iterator one step after another
+                       # when the output does not depend on them (Execution, sequential)
+                       sequential=(args.format_output is None or args.format_output.lower() in _NT)
+                       and not graphs_to_files and not args.distinct)
     except (ParseError, CompileError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -164,8 +168,10 @@ def main(argv=None) -> int:
         # RAISE(message, value...) in the query: its message and values, status 1
         print(f"error: {e}", file=sys.stderr)
         return 1
+    shown = set()
     for w in ex.warnings:
         log.warning(w)
+        shown.add(w)
     if graphs_to_files:
         if ex.plan.kind != "GENERATE":
             log.warning("--graphs-to-files and --targets apply to GENERATE queries only.")
@@ -178,6 +184,9 @@ def main(argv=None) -> int:
                 return 1
     t1 = time.perf_counter()
     if args.explain:
+        if ex._sequential:
+            print("-- sequential batches: the SQL of the first step (batch 0); the next steps "
+                  "compile the same query on the next batches", file=sys.stderr)
         for s in ex.engine.sql_log:
             print(s + ";\n", file=sys.stderr)
         if ex.plan.kind == "GENERATE":
@@ -222,6 +231,9 @@ def main(argv=None) -> int:
         print(f"error: {m.group(0) if m else e}", file=sys.stderr)
         return 1
     finally:
+        for w in ex.warnings:  # the warnings of the next steps of sequential batches
+            if w not in shown:
+                log.warning(w)
         ex.close()
     t2 = time.perf_counter()
     if args.time:
