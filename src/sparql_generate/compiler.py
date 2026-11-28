@@ -65,6 +65,36 @@ DEFAULT_GRAPH_NAMES = ("urn:x-arq:DefaultGraphNode", "urn:x-arq:DefaultGraph")
 DEFAULT_GRAPH_NAMES_SQL = ", ".join(sql_string("<" + g + ">") for g in DEFAULT_GRAPH_NAMES)
 
 
+# The output is the union of one SELECT per triple pattern. DuckDB plans a union of many
+# levels that are not written to a table (rule MAT: a level with a single output pattern, its
+# whole WHERE clause in the SELECT) in a time that grows with the square of their number
+# (gtfs-feeds translated from RML, DuckDB 2.0.1: 90 such SELECTs take 10 s to plan together,
+# 2.6 s one by one; 900 of them never end): the output is several statements, each a union of
+# SELECTs of at most this many characters of SQL (one SELECT when it is longer).
+OUTPUT_STATEMENT_CHARS = 65536
+
+
+def union_statements(parts: List[str], budget: Optional[int] = None) -> List[str]:
+    """The SELECTs ``parts`` (same columns) as a few unions of consecutive SELECTs, each of at
+    most ``budget`` characters (default :data:`OUTPUT_STATEMENT_CHARS`; a longer SELECT
+    alone): their concatenation is the union of all of them."""
+    if budget is None:
+        budget = OUTPUT_STATEMENT_CHARS
+    sep = "\nUNION ALL\n"
+    out: List[str] = []
+    cur: List[str] = []
+    size = 0
+    for q in parts:
+        if cur and size + len(sep) + len(q) > budget:
+            out.append(sep.join(cur))
+            cur, size = [], 0
+        size += (len(sep) if cur else 0) + len(q)
+        cur.append(q)
+    if cur:
+        out.append(sep.join(cur))
+    return out
+
+
 @dataclass
 class Plan:
     kind: str
@@ -83,36 +113,47 @@ class Plan:
             return "SELECT NULL::BIGINT[] AS ord, NULL::VARCHAR AS u, NULL::VARCHAR[] AS args WHERE FALSE"
         return "SELECT u, args FROM (" + " UNION ALL ".join(f"({q})" for q in self.perform_selects) + ") ORDER BY ord"
 
+    def _triple_parts(self) -> List[str]:
+        parts = [f"SELECT * FROM ({q})" for q in self.triple_selects]
+        parts += [f"SELECT s, p, o FROM ({q}) WHERE g IN ({DEFAULT_GRAPH_NAMES_SQL})" for q in self.quad_selects]
+        return parts or ["SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o WHERE FALSE"]
+
     def triples_sql(self, distinct: bool = False) -> str:
         """The triples of the default graph (those of the quad patterns whose graph is Jena's
         name of the default graph included)."""
-        parts = [f"SELECT * FROM ({q})" for q in self.triple_selects]
-        parts += [f"SELECT s, p, o FROM ({q}) WHERE g IN ({DEFAULT_GRAPH_NAMES_SQL})" for q in self.quad_selects]
-        if not parts:
-            return "SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o WHERE FALSE"
-        body = "\nUNION ALL\n".join(parts)
+        body = "\nUNION ALL\n".join(self._triple_parts())
         if distinct:
             return f"SELECT DISTINCT s, p, o FROM ({body})"
         return body
+
+    def triples_statements(self) -> List[str]:
+        """The triples of :meth:`triples_sql` (not distinct) as several statements whose
+        results, one after another, are those triples (:data:`OUTPUT_STATEMENT_CHARS`)."""
+        return union_statements(self._triple_parts())
 
     @property
     def has_quads(self) -> bool:
         """The plan generates quads in named graphs (GRAPH blocks of a template)."""
         return bool(self.quad_selects)
 
-    def quads_sql(self, distinct: bool = False) -> str:
-        """The quads of the dataset: the triples of the default graph with ``g`` NULL, then the
-        quads of the named graphs, ``g`` the N-Triples term of the graph name."""
+    def _quad_parts(self) -> List[str]:
         parts = [f"SELECT s, p, o, NULL::VARCHAR AS g FROM ({q})" for q in self.triple_selects]
         parts += [f"SELECT s, p, o, CASE WHEN g IN ({DEFAULT_GRAPH_NAMES_SQL}) THEN NULL ELSE g END AS g FROM ({q})"
                   for q in self.quad_selects]
-        if not parts:
-            return ("SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o, NULL::VARCHAR AS g "
-                    "WHERE FALSE")
-        body = "\nUNION ALL\n".join(parts)
+        return parts or ["SELECT NULL::VARCHAR AS s, NULL::VARCHAR AS p, NULL::VARCHAR AS o, NULL::VARCHAR AS g "
+                         "WHERE FALSE"]
+
+    def quads_sql(self, distinct: bool = False) -> str:
+        """The quads of the dataset: the triples of the default graph with ``g`` NULL, then the
+        quads of the named graphs, ``g`` the N-Triples term of the graph name."""
+        body = "\nUNION ALL\n".join(self._quad_parts())
         if distinct:
             return f"SELECT DISTINCT s, p, o, g FROM ({body})"
         return body
+
+    def quads_statements(self) -> List[str]:
+        """The quads of :meth:`quads_sql` (not distinct) as several statements, one after another."""
+        return union_statements(self._quad_parts())
 
 
 # ==========================================================================

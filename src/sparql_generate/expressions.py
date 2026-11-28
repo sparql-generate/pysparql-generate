@@ -12,7 +12,7 @@ itself defines (``BOUND``, ``COALESCE``, ``IF``, ``||``, ``&&``, ``!``).
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import List, Optional
 
 from . import ast as A
 from .raising import MARKER, RAISE_MACRO
@@ -232,6 +232,10 @@ def _strlang(s: CExpr, tag: CExpr) -> CExpr:
 
 def _ebv(e: CExpr) -> str:
     """Effective boolean value as SQL BOOLEAN (NULL on error)."""
+    if isinstance(e, RaiseExpr):
+        # a RAISE has no value: evaluated, it raises; one copy of the call, not the six of
+        # the effective boolean value of a dynamic term
+        return f"CAST({e.raw} AS BOOLEAN)"
     t = e.type
     if t.kind == "bool":
         return e.sql
@@ -550,13 +554,17 @@ def _chain(call: A.Call, name: str) -> list:
     return out
 
 
-def _lazy_chain(name: str, ops: List[str]) -> str:
+def _lazy_chain(name: str, ops: List[str], raises: Optional[List[bool]] = None) -> str:
     """``a1 || ... || an`` evaluating the operands in order up to the first true one (``&&``:
     false one), as the Java engine does; else unbound (an error) if one of them is, else
-    false (``&&``: true)."""
+    false (``&&``: true). An operand that is a RAISE (``raises``) is left out of the test for
+    an unbound operand: that test is reached only after every operand was evaluated, and a
+    RAISE evaluated has raised."""
     stop, other = ("TRUE", "FALSE") if name == "||" else ("FALSE", "TRUE")
     whens = " ".join(f"WHEN ({o}) IS {stop} THEN {stop}" for o in ops)
-    nulls = " OR ".join(f"({o}) IS NULL" for o in ops)
+    nulls = " OR ".join(f"({o}) IS NULL" for i, o in enumerate(ops) if not (raises and raises[i]))
+    if not nulls:
+        return f"(CASE {whens} ELSE {other} END)"
     return f"(CASE {whens} WHEN {nulls} THEN NULL ELSE {other} END)"
 
 
@@ -599,12 +607,13 @@ def compile_call(call: A.Call, ctx) -> CExpr:
         return compile_raise(call, ctx)
     if name in ("||", "&&") and len(call.args) == 2:
         # a chain (a || b || c ...) is compiled once, as one operator
-        ops = [_ebv(compile_expr(o, ctx)) for o in _chain(call, name)]
+        compiled = [compile_expr(o, ctx) for o in _chain(call, name)]
+        ops = [_ebv(o) for o in compiled]
         if any(has_raise(o) for o in ops[1:]):
             # DuckDB evaluates every operand of OR and AND: a RAISE is evaluated only when
             # the operands on its left do not decide (one CASE over the chain, each operand
             # copied twice; nested binary CASEs would copy the left operand at each level)
-            return CExpr(_lazy_chain(name, ops), BOOL_T)
+            return CExpr(_lazy_chain(name, ops, [isinstance(o, RaiseExpr) for o in compiled]), BOOL_T)
         return CExpr("(" + f" {'OR' if name == '||' else 'AND'} ".join(ops) + ")", BOOL_T)
     args = [compile_expr(a, ctx) for a in call.args]
     if name == "!":

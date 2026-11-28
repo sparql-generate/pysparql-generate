@@ -277,3 +277,31 @@ def test_datatype_known_at_run_time():
          'BIND(COALESCE(IRI(?l), IF(BOUND(?l), RAISE("not an IRI", ?l), ?none)) AS ?dt) '
          'BIND(STRDT(STR(?v), ?dt) AS ?o)')
     assert objects(q) == ['"1"', f'"2"^^<{XSD}int>']
+
+
+def test_column_checks_call_each_raise_at_most_twice():
+    # the column checks of rml2sparql-generate: in a boolean context a RAISE is one call (not
+    # the six copies of the effective boolean value of a dynamic term), and it is left out of
+    # the test for an unbound operand of || (reached only after it was evaluated); each check
+    # is an operand of the && chain, copied twice
+    cols = [f"c{i}" for i in range(7)]
+    checks = " ".join(f'&& (SUM(IF(STR(?c) = "{c}", 1, 0)) > 0 || RAISE("no such column", "{c}"))' for c in cols)
+    q = PREFIX + (f'GENERATE {{ GENERATE {{ }} ITERATOR iter:CSVHeaders("{",".join(cols)}\\n") AS ?c WHERE {{ }} '
+                  f"GROUP BY ?no HAVING (true {checks}) . ex:s ex:p 1 . }}")
+    with sg.Execution(q, allow_network=False, debug=True) as ex:
+        assert len(list(ex.triples())) == 1
+        calls = sum(s.count("sg_raise(") for s in ex.engine.sql_log)
+    assert calls <= 2 * len(cols)
+    assert str(raised_by_generate(q[len(PREFIX):].replace('"c6", 1', '"c7", 1'))) == 'no such column: "c6"'
+
+
+def test_raise_as_a_condition():
+    # a RAISE whose effective boolean value is needed: evaluated, it raises; not reached, it
+    # does not
+    assert str(raised_by_generate('GENERATE { ex:s ex:p 1 } WHERE { FILTER(RAISE("cond")) }')) == "cond"
+    assert str(raised_by_generate('GENERATE { ex:s ex:p 1 } WHERE { FILTER(!RAISE("not")) }')) == "not"
+    assert str(raised_by_generate('GENERATE { ex:s ex:p 1 } WHERE { FILTER(?u || RAISE("unbound", ?u)) }')) == \
+        "unbound: UNDEF"
+    assert len(generate('GENERATE { ex:s ex:p 1 } WHERE { VALUES ?x { 1 } FILTER(?x = 1 || RAISE("no")) }')) == 1
+    assert len(generate('GENERATE { ex:s ex:p 1 } WHERE { VALUES ?x { 1 } FILTER(!(?x = 2 && RAISE("no"))) }')) == 1
+    assert len(generate('GENERATE { ex:s ex:p 1 } WHERE { BIND(IF(true || RAISE("no"), 1, 0) AS ?y) }')) == 1

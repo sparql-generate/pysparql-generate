@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+Time on queries with many sub-queries, such as those that rml2sparql-generate writes for large
+mappings (gtfs-feeds translated from RML by rml2sparql-generate 0.5.4, kgc-bench harness: 10
+feeds, 28.7 s to 15.8 s; 30 feeds, 154 s to 47 s; the time now grows linearly with the number
+of feeds).
+
+- The output is written statement by statement: the union of the SELECTs of the triple
+  patterns is cut into statements of at most 64 KB of SQL (`compiler.OUTPUT_STATEMENT_CHARS`),
+  run one after another. DuckDB plans a union of many levels that are not written to a table
+  (a level with a single output pattern, its WHERE clause in the SELECT; here, each join of
+  the translation) in a time that grows with the square of their number: 90 of them take
+  10 s to plan in one statement, 2.6 s one by one. To a regular file, the first statement is
+  copied to the path and the others appended through a hidden file next to it, of the same
+  compression; a FIFO and `/dev/stdout` are opened once; `triples()`, `batches()`, `arrow()`,
+  `quads()` and streams read the statements in turn. A distinct output (`--distinct`) stays
+  one statement.
+- A RAISE whose effective boolean value is needed (`... || RAISE(...)`, `FILTER(RAISE(...))`)
+  is one call in the SQL, not six, and it is left out of the test for an unbound operand of
+  `||` and `&&`: the column checks of a translated RML mapping are eight times smaller and
+  plan four times faster.
+
 ## 0.4.2 (2026-11-28)
 
 Memory and time on queries over many documents: sequential batches, and a faster reader of

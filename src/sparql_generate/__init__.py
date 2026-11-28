@@ -29,7 +29,7 @@ import duckdb
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from . import ast
-from .compiler import Compiler, Plan, union_of_batches
+from .compiler import Compiler, Plan, union_of_batches, union_statements
 from .documents import DocumentSet
 from .engine import Engine
 from .expressions import CompileError, DocumentNotFound
@@ -228,7 +228,9 @@ class Execution:
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
-        return _reader(self.engine.relation(self._triples_sql(distinct)), batch_size)
+        if distinct:
+            return _reader(self.engine.relation(self._triples_sql(True)), batch_size)
+        return _readers(self.engine, self._triples_statements(), batch_size)
 
     def arrow(self, distinct: bool = False):
         """The generated triples of the default graph as a ``pyarrow.Table`` with columns s, p, o."""
@@ -236,7 +238,9 @@ class Execution:
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
-        return _raising(lambda: self.engine.relation(self._triples_sql(distinct)).to_arrow_table())
+        if distinct:
+            return _raising(lambda: self.engine.relation(self._triples_sql(True)).to_arrow_table())
+        return self.batches(False).read_all()
 
     def quads(self, distinct: bool = False, batch_size: int = 65536) -> Iterator[Tuple[str, str, str, Optional[str]]]:
         """Iterate over the generated quads ``(s, p, o, g)`` as N-Triples term strings: the
@@ -250,7 +254,9 @@ class Execution:
         self._unbatch()
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
-        return _reader(self.engine.relation(self._quads_sql(distinct)), batch_size)
+        if distinct:
+            return _reader(self.engine.relation(self._quads_sql(True)), batch_size)
+        return _readers(self.engine, self._quads_statements(), batch_size)
 
     def _triples_sql(self, distinct: bool = False) -> str:
         """The triples of the default graph of the output."""
@@ -260,6 +266,23 @@ class Execution:
         parts.append(f"SELECT s, p, o FROM {self._named_sql} WHERE g IS NULL")
         body = "\nUNION ALL\n".join(parts)
         return f"SELECT DISTINCT s, p, o FROM ({body})" if distinct else body
+
+    def _triples_statements(self) -> List[str]:
+        """The triples of :meth:`_triples_sql` (not distinct) as a few statements, one after
+        another (:data:`compiler.OUTPUT_STATEMENT_CHARS`)."""
+        if self._named_sql is None:
+            return self.plan.triples_statements()
+        parts = [f"SELECT * FROM ({q})" for q in self.plan.triple_selects]
+        parts.append(f"SELECT s, p, o FROM {self._named_sql} WHERE g IS NULL")
+        return union_statements(parts)
+
+    def _quads_statements(self) -> List[str]:
+        """The quads of :meth:`_quads_sql` (not distinct) as a few statements, one after another."""
+        if self._named_sql is None:
+            return self.plan.quads_statements()
+        parts = [f"SELECT s, p, o, NULL::VARCHAR AS g FROM ({q})" for q in self.plan.triple_selects]
+        parts.append(f"SELECT s, p, o, g FROM {self._named_sql}")
+        return union_statements(parts)
 
     def _quads_sql(self, distinct: bool = False) -> str:
         """The quads of the output: the default graph (``g`` NULL) and the named graphs."""
@@ -440,17 +463,55 @@ class Execution:
 
     def _write_nt(self, out, distinct: bool) -> int:
         """The triples of the current plan in N-Triples (bulk ``COPY`` to a path)."""
-        if isinstance(out, (str, os.PathLike)):
-            from .terms import sql_string
+        sqls = [self._triples_sql(True)] if distinct else self._triples_statements()
+        return self._write_lines(out, "s || ' ' || p || ' ' || o || ' .'", sqls)
 
-            sql = (f"COPY (SELECT s || ' ' || p || ' ' || o || ' .' AS t FROM ({self._triples_sql(distinct)})) "
-                   f"TO {sql_string(os.fspath(out))} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
-            return self.engine.execute(sql).fetchall()[0][0]
-        n = 0
-        for b in _reader(self.engine.relation(self._triples_sql(distinct)), 65536):
-            for s, p, o in zip(b.column(0).to_pylist(), b.column(1).to_pylist(), b.column(2).to_pylist()):
-                out.write(f"{s} {p} {o} .\n")
-                n += 1
+    def _write_lines(self, out, line: str, sqls: List[str]) -> int:
+        """The lines ``line`` of the rows of the statements ``sqls``, one statement after the
+        other, written to ``out`` (a stream, or a path: bulk ``COPY``); the number of lines.
+        To a regular file, the first statement is copied to the path, the others to a hidden
+        file next to it, of the same compression (gzip members and zstd frames concatenate),
+        appended to it; to another path (a FIFO, ``/dev/stdout``), opened once, each one
+        through a temporary file."""
+        if not isinstance(out, (str, os.PathLike)):
+            n = 0
+            for sql in sqls:
+                for b in _reader(self.engine.relation(f"SELECT {line} AS t FROM ({sql})"), 65536):
+                    for t in b.column(0).to_pylist():
+                        out.write(t + "\n")
+                        n += 1
+            return n
+        import shutil
+        import tempfile
+
+        from .terms import sql_string
+
+        def copy(sql: str, dest: str) -> int:
+            return self.engine.execute(
+                f"COPY (SELECT {line} AS t FROM ({sql})) TO {sql_string(dest)} "
+                f"(FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')").fetchall()[0][0]
+
+        path = os.fspath(out)
+        if len(sqls) == 1 or os.path.abspath(path) == os.devnull:
+            return sum(copy(sql, path) for sql in sqls)
+        ext = next((e for e in (".gz", ".zst") if path.endswith(e)), "")
+        special = os.path.abspath(path).startswith(("/dev/", "/proc/"))
+        regular = not special and (not os.path.exists(path) or os.path.isfile(path))
+        n, rest, tmpdir = 0, sqls, None
+        if regular:
+            n, rest = copy(sqls[0], path), sqls[1:]
+            tmpdir = os.path.dirname(os.path.abspath(path))
+        with open(path, "ab") as dst:
+            for sql in rest:
+                fd, part = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", suffix=".part" + ext,
+                                            dir=tmpdir)
+                os.close(fd)
+                try:
+                    n += copy(sql, part)
+                    with open(part, "rb") as src:
+                        shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
+                finally:
+                    os.remove(part)
         return n
 
     def _write_quads(self, out, format: str, distinct: bool) -> int:
@@ -459,17 +520,8 @@ class Execution:
         self._unbatch()
         if format in _NQ:
             line = "s || ' ' || p || ' ' || o || CASE WHEN g IS NULL THEN '' ELSE ' ' || g END || ' .'"
-            if isinstance(out, (str, os.PathLike)):
-                from .terms import sql_string
-
-                sql = (f"COPY (SELECT {line} AS t FROM ({self._quads_sql(distinct)})) "
-                       f"TO {sql_string(os.fspath(out))} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
-                return self.engine.execute(sql).fetchall()[0][0]
-            n = 0
-            for s, p, o, g in self.quads(distinct):
-                out.write(f"{s} {p} {o}{' ' + g if g is not None else ''} .\n")
-                n += 1
-            return n
+            sqls = [self._quads_sql(True)] if distinct else self._quads_statements()
+            return self._write_lines(out, line, sqls)
         ds = self.to_dataset()
         data = ds.serialize(format="trig")
         _write_text(out, data if isinstance(data, str) else data.decode("utf-8"))
@@ -637,6 +689,28 @@ def _reader(relation, batch_size: int):
             yield b
 
     return pa.RecordBatchReader.from_batches(reader.schema, batches())
+
+
+def _readers(engine, sqls: List[str], batch_size: int):
+    """The record batches of the statements ``sqls``, one after the other (in the schema of
+    the first one), computed as they are read."""
+    import pyarrow as pa
+
+    if len(sqls) == 1:
+        return _reader(engine.relation(sqls[0]), batch_size)
+    first = _reader(engine.relation(sqls[0]), batch_size)
+    schema = first.schema
+
+    def batches():
+        yield from first
+        for sql in sqls[1:]:
+            for b in _reader(engine.relation(sql), batch_size):
+                if b.schema != schema:
+                    b = pa.RecordBatch.from_arrays([c.cast(f.type) for c, f in zip(b.columns, schema)],
+                                                   schema=schema)
+                yield b
+
+    return pa.RecordBatchReader.from_batches(schema, batches())
 
 
 def _rdflib_format(fmt: str) -> str:
