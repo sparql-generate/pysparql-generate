@@ -264,6 +264,22 @@ class Compiler:
         # the reserved variable whose value tags the triples generated (FROM GENERATE compiled
         # on all its groups at once, datasets.TAG), or None
         self.triple_tag: Optional[str] = None
+        # sequential batches (see union_of_batches): when ``sequential``, the batches of the
+        # first iterator of the query, if it has a batch size and constant arguments, are
+        # compiled one after another (``batch_lo``, ``batch_hi``); its rows, the dataset of the query and
+        # the temporary tables in ``protected`` are kept from one batch to the next
+        self.sequential = False
+        # the batches of the current step, [batch_lo, batch_hi): the first step is the first
+        # batch; the next ones group consecutive batches so that a step creates about
+        # step_rows rows (Execution._next_batch): a step has a fixed cost (≈ 0.1 s per
+        # materialised level), and the memory stays bounded by max(one batch, step_rows rows)
+        self.batch_lo, self.batch_hi = 0, 1
+        self.step_rows = 1_000_000
+        self.n_batches: Optional[int] = None
+        self.protected: Optional[set] = None
+        self._root_query: Optional[A.Query] = None
+        self._root_dataset = None
+        self._batch_table: Optional[str] = None
 
     def library_function(self, iri: str):
         """``(signature, body, base)`` of the FUNCTION named ``iri`` in the library, or None:
@@ -287,6 +303,7 @@ class Compiler:
         self.plan = Plan(query.kind)
         if query.kind not in ("GENERATE", "TEMPLATE", "SELECT", "PERFORM"):
             raise CompileError(f"{query.kind} queries are not supported")
+        self._root_query = query
         rel, scope = self.root_relation(query, bindings)
         self.compile_level(query, rel, scope, {}, root=True)
         return self.plan
@@ -385,17 +402,23 @@ class Compiler:
         ctx.prid = ctx.scope.get("\x00prid")
         ctx.partitioned = ctx.prid is not None and query.kind == "TEMPLATE" if partitioned is None else partitioned
         ctx.dataset = dataset  # the dataset of the enclosing level's clauses, if any
+        seq_root = self.sequential and query is self._root_query
         if query.dataset_clauses:
             # rule (FROM): evaluated on the input table, before the binding clauses
             from .datasets import prepare
 
-            rel, ctx.dataset = prepare(self, ctx, rel, query)
+            if seq_root and self._root_dataset is not None:
+                rel, ctx.dataset = self._root_dataset  # computed with the first batch
+            else:
+                rel, ctx.dataset = prepare(self, ctx, rel, query)
+                if seq_root and not ctx.dataset.keyed:
+                    self._root_dataset = (rel, ctx.dataset)
 
         # 1. binding clauses, in order (rules ITERATOR, SOURCE, BIND)
-        for clause in query.binding_clauses:
+        for i, clause in enumerate(query.binding_clauses):
             ctx.begin_operator(rel=rel)
             if isinstance(clause, A.IteratorClause):
-                rel = self.compile_iterator(ctx, rel, clause)
+                rel = self.compile_iterator(ctx, rel, clause, sequential=seq_root and i == 0)
             elif isinstance(clause, A.SourceClause):
                 rel = self.compile_source(ctx, rel, clause)
             elif isinstance(clause, A.Bind):
@@ -491,9 +514,11 @@ class Compiler:
         name = engine.udf("sg_source", udf, ["VARCHAR"], engine.ANY_TYPE, key=accept)
         return self.extend(ctx, rel, clause.var, CExpr(f"{name}({lex(src)})", ANY_T))
 
-    def compile_iterator(self, ctx: LevelContext, rel: Rel, clause: A.IteratorClause) -> Rel:
+    def compile_iterator(self, ctx: LevelContext, rel: Rel, clause: A.IteratorClause,
+                         sequential: bool = False) -> Rel:
         """Rule ITERATOR: a table-valued iterator is cross-joined (constant
-        arguments) or a list-valued one is unnested per row (lateral join)."""
+        arguments) or a list-valued one is unnested per row (lateral join). ``sequential``:
+        the first iterator of a query whose batches are compiled one after another."""
         iri = clause.expr.name
         if iri == CALL_SELECT:
             return self.compile_call_select(ctx, rel, clause)
@@ -536,6 +561,8 @@ class Compiler:
                 pos = plan.pos_column or ("__pos" if plan.positional else "(row_number() OVER () - 1)")  # file order
                 src = f"(SELECT *, {pos} // {int(plan.batch)} AS __bk FROM {plan.sql})"
                 sel.append(self.batch_key(ctx, "t.__bk"))
+                if sequential:
+                    src = self.sequential_batch(src)
             if rel.trivial:
                 return Rel(f"(SELECT {', '.join(sel)} FROM {src} AS t)")
             return Rel(f"(SELECT r.*, {', '.join(sel)} FROM {rel.sql} AS r CROSS JOIN {src} AS t)")
@@ -588,6 +615,19 @@ class Compiler:
         if plan.batch:
             inner_cols.append(self.batch_key(ctx, f"(generate_subscripts(__l, 1) - 1) // {int(plan.batch)}"))
         return Rel(f"(SELECT * EXCLUDE (__l), {', '.join(inner_cols)} FROM {base})")
+
+    def sequential_batch(self, src: str) -> str:
+        """The rows of the current batch of the first iterator of the query (sequential
+        batches): its rows and their batch index are read once, kept in a temporary table."""
+        if self._batch_table is None:
+            t = self.engine.fresh("__batches")
+            self.engine.execute(f"CREATE TEMP TABLE {t} AS SELECT * FROM {src}")
+            self._batch_table = t
+            n = self.engine.execute(f"SELECT max(__bk) FROM {t}").fetchall()[0][0]
+            self.n_batches = 0 if n is None else int(n) + 1
+            # what the next batches reuse: the rows, the dataset of the query, the documents
+            self.protected = set(self.engine.temp_tables())
+        return f"(SELECT * FROM {self._batch_table} WHERE __bk >= {int(self.batch_lo)} AND __bk < {int(self.batch_hi)})"
 
     def batch_key(self, ctx: LevelContext, index_sql: str) -> str:
         """Rule (BATCH): the select item of the batch key after a batched iterator, the list of
@@ -1748,3 +1788,37 @@ def tgroup_to_aggregate(g: A.TGroup) -> A.Aggregate:
             raise CompileError("GROUP in TEMPLATE only supports plain expressions")
     expr = pieces[0] if len(pieces) == 1 else A.Call("CONCAT", tuple(pieces))
     return A.Aggregate("GROUP_CONCAT", (expr,), g.distinct, g.separator if g.separator is not None else "")
+
+
+def union_of_batches(query: A.Query, root: bool = True) -> bool:
+    """True if the output of ``query`` on a list of solutions is the union of its outputs on
+    any partition of that list, so that the batches of its first iterator may be evaluated
+    one after another (the condition of the Java engine 2.6.2, ``RootPlan.isUnionOfBatches``):
+    a GENERATE query with a template, without DISTINCT, REDUCED, aggregate, GROUP BY, HAVING,
+    ORDER BY, LIMIT, OFFSET or LIST, whose sub-queries are such queries without dataset
+    clauses. Also excluded here: GRAPH blocks, named queries (a call, iter:call-select, a
+    named query as an iterator) and initial bindings (checked by the caller)."""
+    if query.kind != "GENERATE" or query.generate_clause is None:
+        return False
+    if (query.distinct or query.reduced or query.group_by or query.having or query.order_by
+            or query.limit is not None or query.offset is not None):
+        return False
+    if not root and query.dataset_clauses:
+        return False
+    for clause in query.binding_clauses:
+        if isinstance(clause, A.IteratorClause) and not clause.expr.name.startswith(A.SG_ITER):
+            return False
+        if isinstance(clause, A.IteratorClause) and clause.expr.name == CALL_SELECT:
+            return False
+    if Compiler.collect_aggregates(None, query):
+        return False
+    for el in query.generate_clause:
+        if isinstance(el, A.GenerateGraph):
+            return False
+        if isinstance(el, A.GenerateTriples):
+            if any(isinstance(t.object, A.ListNode) for t in el.triples):
+                return False
+        elif isinstance(el, A.SubQuery):
+            if el.query.is_named_call or not union_of_batches(el.query, root=False):
+                return False
+    return True

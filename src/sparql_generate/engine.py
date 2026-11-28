@@ -66,6 +66,7 @@ class Engine:
         self._udfs: Dict[Tuple[str, object], str] = {}
         self._counter = 0
         self._tempfiles: List[str] = []
+        self._arrows: List[str] = []  # registered Arrow tables (register_arrow)
         self._doc_ids: Dict[int, int] = {}
         self.max_json = 4294967295
         self._resolve_registered = False
@@ -155,7 +156,26 @@ class Engine:
     def register_arrow(self, table) -> str:
         name = self.fresh("arrow")
         self.con.register(name, table)
+        self._arrows.append(name)
         return name
+
+    def temp_tables(self) -> List[str]:
+        """The temporary tables and registered Arrow tables of the connection."""
+        rows = self.con.execute("SELECT table_name FROM duckdb_tables() WHERE temporary").fetchall()
+        return [r[0] for r in rows] + list(self._arrows)
+
+    def drop_temp_tables(self, keep: set) -> None:
+        """Drop the temporary tables and unregister the Arrow tables not in ``keep`` (and not
+        the dataset of the query, ``__quads``): what one batch of a sequential evaluation
+        created."""
+        for name in self.temp_tables():
+            if name in keep or name.startswith("__quads") or name == "__docs":
+                continue
+            if name in self._arrows:
+                self.con.unregister(name)
+                self._arrows.remove(name)
+            else:
+                self.con.execute(f'DROP TABLE IF EXISTS "{name}"')
 
     def temp_file(self, text: str, suffix: str = ".txt") -> str:
         fd, path = tempfile.mkstemp(suffix=suffix, prefix="sparql_generate_")

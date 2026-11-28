@@ -29,7 +29,7 @@ import duckdb
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from . import ast
-from .compiler import Compiler, Plan
+from .compiler import Compiler, Plan, union_of_batches
 from .documents import DocumentSet
 from .engine import Engine
 from .expressions import CompileError, DocumentNotFound
@@ -124,15 +124,64 @@ class Execution:
             docset = documents
         else:
             docset = DocumentSet(documents, base_dir=base_dir, base=base, allow_network=allow_network)
-        self.engine = Engine(docset, base=base, named_queries=named_queries, dataset=dataset,
-                             threads=threads, memory_limit=memory_limit, fail_on_missing=bool(fail_on_missing))
-        self.engine.debug = debug
-        self.engine.stream_messages, self.engine.stream_seconds = stream_messages, stream_seconds
-        self.compiler = Compiler(self.engine)
+        self._engine_args = (docset, dict(base=base, named_queries=named_queries, dataset=dataset, threads=threads,
+                                          memory_limit=memory_limit, fail_on_missing=bool(fail_on_missing)),
+                             debug, stream_messages, stream_seconds)
+        self._new_engine()
         self.base_dir = base_dir
         # the quads of the named graphs left in the output by graphs_to_files(), or None
         self._named_sql: Optional[str] = None
+        self._bindings = bindings
+        # sequential batches: the output of the query is the union of its outputs on the
+        # batches of its first iterator (union_of_batches), compiled and written one after
+        # another so that the memory is that of one batch. Only the first batch is compiled
+        # here; write() in N-Triples compiles and writes the next ones, any other output
+        # compiles the query again on all the batches at once (_unbatch)
+        self.compiler.sequential = not bindings and union_of_batches(self.query) and \
+            not ast.has_quad_patterns(self.query)
         self.plan: Plan = self.compiler.compile(self.query, bindings)
+        self._sequential = (self.compiler.n_batches or 0) > 1
+        self._written = False  # the batches were written: another output compiles them all again
+
+    def _new_engine(self) -> None:
+        docset, kw, debug, stream_messages, stream_seconds = self._engine_args
+        self.engine = Engine(docset, **kw)
+        self.engine.debug = debug
+        self.engine.stream_messages, self.engine.stream_seconds = stream_messages, stream_seconds
+        self.compiler = Compiler(self.engine)
+
+    def _unbatch(self) -> None:
+        """Compile the query on all the batches of its first iterator at once (an output
+        other than write() in N-Triples, of a query whose batches were compiled one by one)."""
+        if not self._sequential:
+            return
+        warnings = self.plan.warnings
+        self.engine.close()
+        self._new_engine()
+        self.plan = self.compiler.compile(self.query, self._bindings)
+        self.plan.warnings[:0] = [w for w in warnings if w not in self.plan.warnings]
+        self._sequential = False
+
+    def _next_batch(self) -> bool:
+        """Compile the next step of a sequential evaluation; False after the last one. After
+        the first batch, a step groups as many consecutive batches as fit in
+        ``Compiler.step_rows`` rows, from the rows that the first batch created."""
+        c = self.compiler
+        n = c.n_batches or 0
+        if c.batch_hi >= n:
+            return False
+        if c.batch_lo == 0:
+            rows = self.engine.con.execute(
+                "SELECT table_name, estimated_size FROM duckdb_tables() WHERE temporary").fetchall()
+            created = sum(sz for name, sz in rows if name not in c.protected)
+            self._step = max(1, c.step_rows // max(1, created))
+        warnings = self.plan.warnings
+        self.engine.drop_temp_tables(c.protected)
+        c.batch_lo, c.batch_hi = c.batch_hi, min(n, c.batch_hi + self._step)
+        self.plan = c.compile(self.query, self._bindings)
+        warnings.extend(w for w in self.plan.warnings if w not in warnings)
+        self.plan.warnings = warnings
+        return True
 
     @property
     def warnings(self) -> List[str]:
@@ -160,12 +209,14 @@ class Execution:
     def triples(self, distinct: bool = False, batch_size: int = 65536) -> Iterator[Tuple[str, str, str]]:
         """Iterate over the generated triples of the default graph as N-Triples term strings
         (read by Arrow record batches: about twice as fast as fetching Python tuples)."""
+        self._unbatch()
         for b in self.batches(distinct, batch_size):
             yield from zip(b.column(0).to_pylist(), b.column(1).to_pylist(), b.column(2).to_pylist())
 
     def batches(self, distinct: bool = False, batch_size: int = 65536):
         """The generated triples as a stream of ``pyarrow.RecordBatch`` (columns s, p, o of
         N-Triples term strings), computed as they are read."""
+        self._unbatch()
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
@@ -173,6 +224,7 @@ class Execution:
 
     def arrow(self, distinct: bool = False):
         """The generated triples of the default graph as a ``pyarrow.Table`` with columns s, p, o."""
+        self._unbatch()
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         self._default_graph_only()
@@ -187,6 +239,7 @@ class Execution:
 
     def quad_batches(self, distinct: bool = False, batch_size: int = 65536):
         """The generated quads as a stream of ``pyarrow.RecordBatch`` (columns s, p, o, g)."""
+        self._unbatch()
         if self.plan.kind != "GENERATE":
             raise TypeError(f"not a GENERATE query ({self.plan.kind})")
         return _reader(self.engine.relation(self._quads_sql(distinct)), batch_size)
@@ -232,6 +285,7 @@ class Execution:
         ``dump.nq``.  Afterwards, the outputs of this execution hold the other graphs only.
         Returns the number of quads written to each file, by path.  A graph name that cannot
         be written (a path that leaves the folder...) raises :class:`targets.TargetError`."""
+        self._unbatch()
         from .compiler import DEFAULT_GRAPH_NAMES_SQL
         from .targets import GraphTargets, read_descriptions, write_target
 
@@ -270,6 +324,7 @@ class Execution:
 
     def to_dataset(self):
         """The generated quads as an ``rdflib.Dataset`` (default graph and named graphs)."""
+        self._unbatch()
         import rdflib
 
         ds = rdflib.Dataset(default_union=False)
@@ -297,26 +352,61 @@ class Execution:
             return self._write_quads(out, format.lower(), distinct)
         self._default_graph_only()
         if format in ("nt", "ntriples", "n-triples", "application/n-triples"):
-            if isinstance(out, (str, os.PathLike)):
-                path = os.fspath(out)
-                from .terms import sql_string
-
-                sql = (f"COPY (SELECT s || ' ' || p || ' ' || o || ' .' AS t FROM ({self._triples_sql(distinct)})) "
-                       f"TO {sql_string(path)} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
-                return self.engine.execute(sql).fetchall()[0][0]
-            n = 0
-            for s, p, o in self.triples(distinct):
-                out.write(f"{s} {p} {o} .\n")
-                n += 1
-            return n
+            if self._sequential and not self._written and not distinct and self._named_sql is None:
+                self._written = True
+                return self._write_sequential(out)
+            self._unbatch()
+            return self._write_nt(out, distinct)
+        self._unbatch()
         g = self.to_graph()
         data = g.serialize(format=_rdflib_format(format))
         _write_text(out, data if isinstance(data, str) else data.decode("utf-8"))
         return len(g)
 
+    def _write_sequential(self, out) -> int:
+        """N-Triples, one batch after another (sequential batches): the first batch in the
+        output, each next one in a temporary file appended to it (a file of one batch, removed
+        at once, mostly never reaches the disk), or straight to a file that is not a regular
+        file (``/dev/null``) and to a stream."""
+        import shutil
+        import tempfile
+
+        n = self._write_nt(out, False)
+        path = os.fspath(out) if isinstance(out, (str, os.PathLike)) else None
+        direct = path is None or not os.path.isfile(path)
+        while self._next_batch():
+            if direct:
+                n += self._write_nt(out, False)
+                continue
+            fd, part = tempfile.mkstemp(prefix=".sparql_generate_", suffix=".nt", dir=os.path.dirname(os.path.abspath(path)))
+            os.close(fd)
+            try:
+                n += self._write_nt(part, False)
+                with open(part, "rb") as src, open(path, "ab") as dst:
+                    shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
+            finally:
+                os.remove(part)
+        return n
+
+    def _write_nt(self, out, distinct: bool) -> int:
+        """The triples of the current plan in N-Triples (bulk ``COPY`` to a path)."""
+        if isinstance(out, (str, os.PathLike)):
+            from .terms import sql_string
+
+            sql = (f"COPY (SELECT s || ' ' || p || ' ' || o || ' .' AS t FROM ({self._triples_sql(distinct)})) "
+                   f"TO {sql_string(os.fspath(out))} (FORMAT CSV, HEADER false, QUOTE '', ESCAPE '')")
+            return self.engine.execute(sql).fetchall()[0][0]
+        n = 0
+        for b in _reader(self.engine.relation(self._triples_sql(distinct)), 65536):
+            for s, p, o in zip(b.column(0).to_pylist(), b.column(1).to_pylist(), b.column(2).to_pylist()):
+                out.write(f"{s} {p} {o} .\n")
+                n += 1
+        return n
+
     def _write_quads(self, out, format: str, distinct: bool) -> int:
         """N-Quads (bulk ``COPY``; a triple of the default graph is a line of N-Triples) or
         TriG; returns the number of quads written for N-Quads, else -1."""
+        self._unbatch()
         if format in _NQ:
             line = "s || ' ' || p || ' ' || o || CASE WHEN g IS NULL THEN '' ELSE ' ' || g END || ' .'"
             if isinstance(out, (str, os.PathLike)):
@@ -338,6 +428,7 @@ class Execution:
     def to_graph(self):
         """The generated triples of the default graph as an ``rdflib.Graph`` (with a warning
         when the query generates quads in named graphs: see :meth:`to_dataset`)."""
+        self._unbatch()
         import rdflib
 
         g = rdflib.Graph()

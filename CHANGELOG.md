@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Sequential batches: when the output of a GENERATE query is the union of its outputs on the
+  batches of its first iterator (an iterator with a batch size and constant arguments, such
+  as `iter:CSV(<FEEDS.csv>, 1, "feed")`; no DISTINCT, REDUCED, aggregate, GROUP BY, HAVING,
+  ORDER BY, LIMIT, OFFSET or LIST, sub-queries without dataset clauses, no GRAPH block nor
+  named query: the condition of the Java engine 2.6.2), `write()` in N-Triples (and the
+  command line) compiles and writes the batches one step after another; the rows of the
+  iterator and the dataset of the query are computed once. After the first batch, a step
+  groups as many consecutive batches as fit in about a million rows of the tables that the
+  first batch created: the memory is that of one step, not of all the batches (gtfs-feeds,
+  100 feeds: 3.7 GB to 1.5 GB). Any other output evaluates all the batches at once.
 - `iter:CSV` on a document computed per row (a variable, an IRI template) is read about
   three times faster: the rows of a vector of documents are returned to DuckDB as Arrow
   arrays built column by column, instead of a Python dict per row (gtfs-feeds, 100 feeds:
