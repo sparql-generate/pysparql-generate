@@ -401,9 +401,18 @@ class Execution:
         special = os.path.abspath(path).startswith(("/dev/", "/proc/"))
         regular = not special and (not os.path.exists(path) or os.path.isfile(path))
         if regular:
+            # a hidden file next to the destination (left behind only if the process is
+            # killed), given the mode of the destination: that of an existing file, else
+            # 0o666 less the umask, as open() would
             fd, dest = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".",
                                         dir=os.path.dirname(os.path.abspath(path)))
             os.close(fd)
+            if os.path.exists(path):
+                shutil.copymode(path, dest)
+            else:
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(dest, 0o666 & ~umask)
         else:  # a FIFO, /dev/stdout: opened once, in append mode
             dest = path
         n = 0

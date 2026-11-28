@@ -230,6 +230,9 @@ def main(argv=None) -> int:
         m = re.search(r"Document not found: \S+", str(e))
         print(f"error: {m.group(0) if m else e}", file=sys.stderr)
         return 1
+    except OSError as e:  # the output cannot be written (a directory, a full disk, a permission)
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     finally:
         for w in ex.warnings:  # the warnings of the next steps of sequential batches
             if w not in shown:

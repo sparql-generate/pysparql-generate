@@ -14,10 +14,16 @@
   the iterator and the dataset of the query are computed once. A step groups as many
   consecutive batches as fit in about a million rows, from the largest batch seen so far: the
   memory is that of one step (gtfs-feeds, 100 feeds: 3.7 GB to 1.5 GB; 1,000 feeds in 9.4 GB
-  instead of more than 24 GB). A regular file is written under a temporary name and renamed
-  at the end (an error leaves it as it was); a compressed file (`.gz`, `.zst`), a FIFO and
-  `/dev/stdout` receive the steps in turn. Any other output evaluates all the batches at
-  once; `--explain` shows the SQL of the first step.
+  instead of more than 24 GB). A regular file is written under a hidden temporary name next
+  to it and renamed at the end, with the mode of the existing file or that of a new one: with
+  the API, an error leaves the destination as it was (the command line empties the output
+  file first, as before and as the Java engine); a process killed by SIGKILL leaves the
+  hidden file behind. A compressed file (`.gz`, `.zst`), a FIFO and `/dev/stdout` receive the
+  steps in turn. A `BNODE()` in a WHERE clause, even in a `BIND`, keeps the batches together.
+  Any other output evaluates all the batches at once; `--explain` shows the SQL of the first
+  step.
+- The command line reports an output that cannot be written (a directory, a permission, a
+  full disk) as an error, without a traceback.
 - `iter:CSV` on a document computed per row (a variable, an IRI template) is read about
   three times faster: the rows of a vector of documents are returned to DuckDB as Arrow
   arrays built column by column, instead of a Python dict per row (gtfs-feeds, 100 feeds:

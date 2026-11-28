@@ -208,16 +208,56 @@ def test_destination_left_as_it_was_on_error(tmp_path):
 
 
 def test_fifo_output(tmp_path):
+    """A FIFO receives the steps in turn (one end of file at the end): the write and the
+    reader run in threads, so that a hang fails the test instead of blocking it."""
     fifo = str(tmp_path / "fifo")
     os.mkfifo(fifo)
-    got = []
-    reader = threading.Thread(target=lambda: got.append(open(fifo, encoding="utf-8").read()))
+    got, done = [], []
+    reader = threading.Thread(target=lambda: got.append(open(fifo, encoding="utf-8").read()), daemon=True)
     reader.start()
+
+    def write():
+        with execution() as ex:
+            done.append(ex.write(fifo))
+
+    writer = threading.Thread(target=write, daemon=True)
+    writer.start()
+    writer.join(60)
+    reader.join(60)
+    assert not writer.is_alive() and not reader.is_alive(), "the write to the FIFO hangs"
+    assert done[0] == len(got[0].splitlines()) == K * (1 + 4 * N)
+
+
+def test_file_mode(tmp_path):
+    """A new file gets 0o666 less the umask, as open() gives; an existing one keeps its mode."""
+    umask = os.umask(0o027)
+    try:
+        new = tmp_path / "new.nt"
+        with execution() as ex:
+            ex.write(str(new))
+        assert (os.stat(new).st_mode & 0o777) == 0o640
+    finally:
+        os.umask(umask)
+    old = tmp_path / "old.nt"
+    old.write_text("before\n")
+    os.chmod(old, 0o604)
     with execution() as ex:
-        n = ex.write(fifo)
-    reader.join(30)
-    assert not reader.is_alive()
-    assert n == len(got[0].splitlines()) == K * (1 + 4 * N)
+        ex.write(str(old))
+    assert (os.stat(old).st_mode & 0o777) == 0o604
+    assert len(old.read_text().splitlines()) == K * (1 + 4 * N)
+
+
+def test_cli_output_error(tmp_path):
+    """An output that cannot be written (here a directory): a message, status 1, no traceback."""
+    for name, text in DOCS.items():
+        (tmp_path / name.rsplit("/", 1)[1]).write_text(text)
+    q = QUERY.replace("http://ex.org/FEEDS.csv", "FEEDS.csv").replace("http://ex.org/T-{?feed}.csv", "T-{?feed}.csv")
+    (tmp_path / "query.rqg").write_text("BASE <http://ex.org/>\n" + q)
+    (tmp_path / "out.nt").mkdir()
+    r = subprocess.run([sys.executable, "-m", "sparql_generate.cli", "-d", str(tmp_path), "-q", "query.rqg",
+                        "-o", str(tmp_path / "out.nt")], capture_output=True, text=True)
+    assert r.returncode == 1
+    assert r.stderr.startswith("error: ") and "Traceback" not in r.stderr
 
 
 def test_cli_to_dev_stdout(tmp_path):
