@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 (2026-11-28)
+
+Memory and time on queries over many documents: sequential batches, and a faster reader of
+`iter:CSV` on a document computed per row.
 
 - Sequential batches, on request (`Execution(sequential=True)`; the command line and
   `generate_to` in N-Triples): when the output of a GENERATE query is the union of its

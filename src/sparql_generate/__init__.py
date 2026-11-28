@@ -43,7 +43,7 @@ __all__ = [
     "Execution", "load_conf", "QuadsNotSupported", "QUAD_FORMATS", "TargetError",
     "ParseError", "CompileError", "DocumentNotFound", "RaiseError", "Engine", "DocumentSet", "__version__",
 ]
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 Documents = Union[DocumentSet, Dict[str, object], List[dict], None]
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysparql-generate"
-version = "0.4.1"
+version = "0.4.2"
 description = "SPARQL-Generate compiled to a columnar engine (DuckDB): generate RDF or text from CSV, JSON, XML, HTML and RDF"
 readme = "README.md"
 license = {text = "Apache-2.0"}
