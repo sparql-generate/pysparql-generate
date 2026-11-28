@@ -12,8 +12,8 @@ identifiers:
     value: "10.5281/zenodo.24441877"
     description: "All versions (concept DOI)"
   - type: doi
-    value: "10.5281/zenodo.24606565"
-    description: "Version 0.4.1"
+    value: "10.5281/zenodo.24615614"
+    description: "Version 0.4.2"
 repository-code: "https://github.com/sparql-generate/pysparql-generate"
 url: "https://pypi.org/project/pysparql-generate/"
 authors:
